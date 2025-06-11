@@ -43,29 +43,20 @@ export default async (req: Request, context: Context) => {
     const skipImages = new URL(req.url).searchParams.get('skipImages') === 'true';
     const fastMode = new URL(req.url).searchParams.get('fast') === 'true';
     
-    console.log(`🚀 Starting prerender for: ${targetUrl}`);
-    console.log(`⚙️  Options: skipImages=${skipImages}, fastMode=${fastMode}`);
-    
     if (!targetUrl) {
-      console.error('❌ Missing url parameter');
+      console.error('PRERENDER ERROR: Missing url parameter');
       return new Response('Missing url parameter', { status: 400 });
     }
 
-    console.log('🔧 Getting browser instance...');
     const browserInstance = await getBrowser();
-    console.log('📄 Creating new page...');
     const page = await browserInstance.newPage();
 
     // Set prerender user agent for consistent behavior
-    console.log('🔄 Setting user agent...');
     await page.setUserAgent('Mozilla/5.0 (compatible; Prerender)');
     
     // Set up request interception for performance and clean rendering
     if (!fastMode) {
-      console.log('🚫 Setting up request interception...');
       await page.setRequestInterception(true);
-    } else {
-      console.log('⚡ Fast mode enabled - skipping request interception');
     }
     
     let blockedCount = 0;
@@ -111,11 +102,9 @@ export default async (req: Request, context: Context) => {
     }
 
     // Set a reasonable viewport
-    console.log('📏 Setting viewport...');
     await page.setViewport({ width: 1200, height: 800 });
 
     // Performance optimization: disable unnecessary features
-    console.log('🔧 Disabling unnecessary browser features...');
     await page.evaluateOnNewDocument(() => {
       // Disable service workers during prerender
       if ('serviceWorker' in navigator) {
@@ -138,7 +127,6 @@ export default async (req: Request, context: Context) => {
     });
 
     // Navigate to the URL with optimized settings
-    console.log(`🌐 Navigating to: ${targetUrl}`);
     const navigationStart = Date.now();
     
     try {
@@ -146,55 +134,42 @@ export default async (req: Request, context: Context) => {
         waitUntil: 'domcontentloaded',
         timeout: 10000 
       });
-      const navigationTime = Date.now() - navigationStart;
-      console.log(`✅ Navigation completed in ${navigationTime}ms`);
     } catch (navigationError) {
-      console.error(`❌ Navigation failed: ${navigationError.message}`);
+      console.error(`PRERENDER ERROR: Navigation failed for ${targetUrl}: ${navigationError.message}`);
       throw navigationError;
     }
 
     // Wait for window.prerenderReady or timeout after 1 second for faster response
-    console.log('⏳ Waiting for window.prerenderReady...');
+    let prerenderReady = false;
     try {
       await page.waitForFunction(
         () => window.prerenderReady === true,
         { timeout: 1000 }
       );
-      console.log('✅ window.prerenderReady detected!');
+      prerenderReady = true;
     } catch (timeoutError) {
       // Continue if prerenderReady is not set within timeout
-      console.log('⚠️  window.prerenderReady not detected within 1s, proceeding with render');
     }
 
     // Brief additional wait (500ms) for any pending renders
-    console.log('⏱️  Additional 500ms wait for pending renders...');
     await new Promise(resolve => setTimeout(resolve, 500));
 
     // Check for prerender status code meta tag
-    console.log('🔍 Checking for prerender meta tags...');
     const statusCodeMeta = await page.$eval(
       'meta[name="prerender-status-code"]',
       (el) => el?.getAttribute('content')
     ).catch(() => null);
-    
-    if (statusCodeMeta) {
-      console.log(`📋 Found prerender-status-code: ${statusCodeMeta}`);
-    }
 
     // Check for prerender redirect header meta tag
     const redirectMeta = await page.$eval(
       'meta[name="prerender-header"]',
       (el) => el?.getAttribute('content')
     ).catch(() => null);
-    
-    if (redirectMeta) {
-      console.log(`📋 Found prerender-header: ${redirectMeta}`);
-    }
 
     // Clean up any open dialogs or alerts that might interfere (skip in fast mode)
+    let removedElements = 0;
     if (!fastMode) {
-      console.log('🧹 Cleaning up DOM elements (cookie banners, modals)...');
-      const removedElements = await page.evaluate(() => {
+      removedElements = await page.evaluate(() => {
         // Remove cookie consent banners and modals
         const selectors = [
           '[id*="cookie"]', '[class*="cookie"]', '[id*="consent"]', '[class*="consent"]',
@@ -214,36 +189,19 @@ export default async (req: Request, context: Context) => {
         });
         return removedCount;
       });
-      
-      if (removedElements > 0) {
-        console.log(`🗑️  Removed ${removedElements} DOM elements`);
-      } else {
-        console.log('✨ No DOM elements needed cleaning');
-      }
-    } else {
-      console.log('⚡ Fast mode - skipping DOM cleanup');
     }
 
     // Get the rendered HTML
-    console.log('📤 Extracting rendered HTML...');
     const html = await page.content();
     const htmlSize = Buffer.byteLength(html, 'utf8');
-    console.log(`📄 HTML size: ${htmlSize} bytes`);
-    
-    // Log request statistics
-    if (!fastMode) {
-      console.log(`📊 Request stats: ${allowedCount} allowed, ${blockedCount} blocked`);
-    }
     
     // Clean up page resources
-    console.log('🧹 Closing page...');
     await page.close();
     
     const renderTime = Date.now() - startTime;
-    console.log(`✅ Prerender completed in ${renderTime}ms for ${targetUrl}`);
+    const navigationTime = Date.now() - navigationStart;
 
     // Handle different status codes and enhanced caching
-    console.log('📦 Processing response headers and status codes...');
     let statusCode = 200;
     let headers: Record<string, string> = {
       'Content-Type': 'text/html; charset=utf-8',
@@ -259,14 +217,12 @@ export default async (req: Request, context: Context) => {
       const code = parseInt(statusCodeMeta, 10);
       if (code >= 100 && code < 600) {
         statusCode = code;
-        console.log(`🔢 Using custom status code: ${code}`);
         
         // Handle redirects
         if (code >= 300 && code < 400 && redirectMeta) {
           const locationMatch = redirectMeta.match(/Location:\s*(.+)/i);
           if (locationMatch) {
             headers['Location'] = locationMatch[1].trim();
-            console.log(`🔀 Redirect to: ${headers['Location']}`);
             // Short cache for redirects
             headers['Netlify-CDN-Cache-Control'] = 'public, max-age=3600, durable';
             headers['Cache-Control'] = 'public, max-age=300';
@@ -275,18 +231,17 @@ export default async (req: Request, context: Context) => {
         
         // Adjust caching for error status codes
         if (code === 404) {
-          console.log('🚫 404 page - adjusting cache headers');
           headers['Netlify-CDN-Cache-Control'] = 'public, max-age=3600, durable';
           headers['Cache-Control'] = 'public, max-age=300';
         } else if (code >= 500) {
-          console.log('💥 Server error - disabling cache');
           headers['Netlify-CDN-Cache-Control'] = 'no-cache';
           headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
         }
       }
     }
 
-    console.log(`🎯 Final response: ${statusCode} status, ${htmlSize} bytes`);
+    // Single success log line with all important details
+    console.log(`PRERENDER SUCCESS: ${targetUrl} | ${renderTime}ms total (${navigationTime}ms nav) | ${statusCode} status | ${htmlSize}B HTML | prereaderReady=${prerenderReady} | fastMode=${fastMode} | skipImages=${skipImages} | requests=${allowedCount}/${allowedCount + blockedCount} | domCleanup=${removedElements}`);
     
     return new Response(html, {
       status: statusCode,
@@ -294,9 +249,8 @@ export default async (req: Request, context: Context) => {
     });
   } catch (error) {
     const errorTime = Date.now() - startTime;
-    console.error(`💥 Prerender error after ${errorTime}ms:`, error);
-    console.error(`📍 Error for URL: ${targetUrl || 'unknown'}`);
-    console.error(`🔍 Error stack:`, error.stack);
+    console.error(`PRERENDER ERROR: ${targetUrl || 'unknown'} | ${errorTime}ms | ${error.message}`);
+    console.error(`PRERENDER ERROR STACK: ${error.stack}`);
     return new Response('Prerender failed', { status: 500 });
   }
 };

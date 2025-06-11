@@ -37,15 +37,65 @@ async function getBrowser() {
 export default async (req: Request, context: Context) => {
   const startTime = Date.now();
   const requestUrl = req.url;
+  const clientIP = context.ip || req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
+  const userAgent = req.headers.get('user-agent') || 'unknown';
   
   try {
-    const targetUrl = new URL(req.url).searchParams.get('url');
+    const targetUrlParam = new URL(req.url).searchParams.get('url');
     const skipImages = new URL(req.url).searchParams.get('skipImages') === 'true';
     const fastMode = new URL(req.url).searchParams.get('fast') === 'true';
     
-    if (!targetUrl) {
+    if (!targetUrlParam) {
       console.error('PRERENDER ERROR: Missing url parameter');
       return new Response('Missing url parameter', { status: 400 });
+    }
+
+    // Security: Prevent open proxy usage by ensuring same host
+    const requestHost = new URL(req.url).host;
+    let targetUrl: string;
+    
+    try {
+      const parsedTargetUrl = new URL(targetUrlParam);
+      
+      // Security checks to prevent abuse
+      
+      // 1. Only allow same-host requests to prevent open proxy abuse
+      if (parsedTargetUrl.host !== requestHost) {
+        console.error(`PRERENDER ERROR: Host mismatch - request from ${requestHost}, target ${parsedTargetUrl.host}`);
+        return new Response('Invalid target URL: must be same host', { status: 403 });
+      }
+      
+      // 2. Only allow HTTP/HTTPS protocols
+      if (!['http:', 'https:'].includes(parsedTargetUrl.protocol)) {
+        console.error(`PRERENDER ERROR: Invalid protocol ${parsedTargetUrl.protocol} for ${targetUrlParam}`);
+        return new Response('Invalid protocol: only HTTP/HTTPS allowed', { status: 403 });
+      }
+      
+      // 3. Prevent localhost and private IP access if not in development
+      const hostname = parsedTargetUrl.hostname;
+      const isPrivateNetwork = 
+        hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
+        hostname.startsWith('192.168.') ||
+        hostname.startsWith('10.') ||
+        hostname.startsWith('172.16.') ||
+        hostname.startsWith('172.17.') ||
+        hostname.startsWith('172.18.') ||
+        hostname.startsWith('172.19.') ||
+        hostname.startsWith('172.2') ||
+        hostname.startsWith('172.30.') ||
+        hostname.startsWith('172.31.') ||
+        hostname === '::1';
+      
+      if (isPrivateNetwork && process.env.NETLIFY) {
+        console.error(`PRERENDER ERROR: Private network access denied for ${hostname}`);
+        return new Response('Private network access not allowed', { status: 403 });
+      }
+      
+      targetUrl = targetUrlParam;
+    } catch (urlError) {
+      console.error(`PRERENDER ERROR: Invalid URL format: ${targetUrlParam}`);
+      return new Response('Invalid URL format', { status: 400 });
     }
 
     const browserInstance = await getBrowser();
@@ -241,7 +291,7 @@ export default async (req: Request, context: Context) => {
     }
 
     // Single success log line with all important details
-    console.log(`PRERENDER SUCCESS: ${targetUrl} | ${renderTime}ms total (${navigationTime}ms nav) | ${statusCode} status | ${htmlSize}B HTML | prereaderReady=${prerenderReady} | fastMode=${fastMode} | skipImages=${skipImages} | requests=${allowedCount}/${allowedCount + blockedCount} | domCleanup=${removedElements}`);
+    console.log(`PRERENDER SUCCESS: ${targetUrl} | ${renderTime}ms total (${navigationTime}ms nav) | ${statusCode} status | ${htmlSize}B HTML | prereaderReady=${prerenderReady} | fastMode=${fastMode} | skipImages=${skipImages} | requests=${allowedCount}/${allowedCount + blockedCount} | domCleanup=${removedElements} | IP=${clientIP}`);
     
     return new Response(html, {
       status: statusCode,
@@ -249,7 +299,7 @@ export default async (req: Request, context: Context) => {
     });
   } catch (error) {
     const errorTime = Date.now() - startTime;
-    console.error(`PRERENDER ERROR: ${targetUrl || 'unknown'} | ${errorTime}ms | ${error.message}`);
+    console.error(`PRERENDER ERROR: ${targetUrl || 'unknown'} | ${errorTime}ms | ${error.message} | IP=${clientIP}`);
     console.error(`PRERENDER ERROR STACK: ${error.stack}`);
     return new Response('Prerender failed', { status: 500 });
   }

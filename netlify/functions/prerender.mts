@@ -13,20 +13,35 @@ let browser: any = null;
 
 async function getBrowser() {
   if (!browser) {
-    // Check if running locally (development) or in production
-    if (process.env.NODE_ENV === 'development' || !process.env.NETLIFY) {
-      // Local development - use bundled Chromium
-      browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-      });
-    } else {
-      // Production - use sparticuz/chromium for Netlify
+    // Check if running in Netlify/AWS Lambda environment
+    const isProduction = process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY || process.env.NODE_ENV === 'production';
+    
+    // Debug logging
+    console.log('Environment check:', {
+      AWS_LAMBDA_FUNCTION_NAME: process.env.AWS_LAMBDA_FUNCTION_NAME,
+      NETLIFY: process.env.NETLIFY,
+      NODE_ENV: process.env.NODE_ENV,
+      isProduction
+    });
+    
+    if (isProduction) {
+      // Production - use sparticuz/chromium for Netlify/Lambda
+      console.log('Production environment detected, using @sparticuz/chromium');
+      const executablePath = await chromium.executablePath();
+      console.log('Chrome executable path:', executablePath);
+      
       browser = await puppeteer.launch({
         args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
         defaultViewport: chromium.defaultViewport,
-        executablePath: await chromium.executablePath(),
+        executablePath: executablePath,
         headless: chromium.headless,
+      });
+    } else {
+      // Local development - use bundled Chromium
+      console.log('Local development environment detected, using bundled Chromium');
+      browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
       });
     }
   }

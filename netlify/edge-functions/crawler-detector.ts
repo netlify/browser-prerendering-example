@@ -67,7 +67,6 @@ export default async (req: Request, context: Context) => {
   // Check if this is a crawler or prerender request
   const shouldPrerender = isCrawler(userAgent) || isPrerenderRequest(url);
   
-  console.log("shouldPrerender", shouldPrerender, isCrawler(userAgent), isPrerenderRequest(url), url)
   if (shouldPrerender) {
     // Construct the prerender URL
     const prerenderUrl = new URL('/api/prerender', req.url);
@@ -93,7 +92,6 @@ export default async (req: Request, context: Context) => {
     }
   }
   
-  console.log("route to next request")
   // For regular users, serve the normal page
   return context.next();
 };

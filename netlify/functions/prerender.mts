@@ -35,6 +35,8 @@ async function getBrowser() {
 }
 
 export default async (req: Request, context: Context) => {
+  const startTime = Date.now();
+  
   try {
     const targetUrl = new URL(req.url).searchParams.get('url');
     
@@ -48,51 +50,52 @@ export default async (req: Request, context: Context) => {
     // Set prerender user agent for consistent behavior
     await page.setUserAgent('Mozilla/5.0 (compatible; Prerender)');
     
-    // Block cookie consent banners and tracking scripts for cleaner prerendering
-    await page.setRequestInterception(true);
-    page.on('request', (request) => {
-      const url = request.url();
-      const resourceType = request.resourceType();
-      
-      // Block common cookie consent and tracking domains
-      const blockedDomains = [
-        'cookiebot.com',
-        'onetrust.com',
-        'quantcast.com',
-        'cookiepro.com',
-        'trustarc.com',
-        'cookielaw.org',
-        'google-analytics.com',
-        'googletagmanager.com',
-        'facebook.com/tr',
-        'hotjar.com'
-      ];
-      
-      // Block tracking pixels and cookie consent scripts
-      if (blockedDomains.some(domain => url.includes(domain)) ||
-          (resourceType === 'image' && (url.includes('track') || url.includes('pixel'))) ||
-          (resourceType === 'script' && (url.includes('cookie') || url.includes('consent')))) {
-        request.abort();
-      } else {
-        request.continue();
-      }
-    });
-
-    // Set a reasonable viewport
-    await page.setViewport({ width: 1200, height: 800 });
-
-    // Disable images and CSS for faster rendering (can be toggled based on needs)
+    // Set up request interception for performance and clean rendering
     const skipImages = new URL(req.url).searchParams.get('skipImages') === 'true';
-    if (skipImages) {
+    const fastMode = new URL(req.url).searchParams.get('fast') === 'true';
+    
+    if (!fastMode) {
       await page.setRequestInterception(true);
+    }
+    
+    if (!fastMode) {
       page.on('request', (request) => {
-        if (request.resourceType() === 'image' || request.resourceType() === 'stylesheet') {
+        const url = request.url();
+        const resourceType = request.resourceType();
+        
+        // Block common cookie consent and tracking domains
+        const blockedDomains = [
+          'cookiebot.com',
+          'onetrust.com',
+          'quantcast.com',
+          'cookiepro.com',
+          'trustarc.com',
+          'cookielaw.org',
+          'google-analytics.com',
+          'googletagmanager.com',
+          'facebook.com/tr',
+          'hotjar.com'
+        ];
+        
+        // Skip images and CSS if requested for faster rendering
+        if (skipImages && (resourceType === 'image' || resourceType === 'stylesheet')) {
+          request.abort();
+          return;
+        }
+        
+        // Block tracking pixels and cookie consent scripts
+        if (blockedDomains.some(domain => url.includes(domain)) ||
+            (resourceType === 'image' && (url.includes('track') || url.includes('pixel'))) ||
+            (resourceType === 'script' && (url.includes('cookie') || url.includes('consent')))) {
           request.abort();
         } else {
           request.continue();
         }
       });
     }
+
+    // Set a reasonable viewport
+    await page.setViewport({ width: 1200, height: 800 });
 
     // Performance optimization: disable unnecessary features
     await page.evaluateOnNewDocument(() => {
@@ -119,26 +122,22 @@ export default async (req: Request, context: Context) => {
     // Navigate to the URL with optimized settings
     await page.goto(targetUrl, { 
       waitUntil: 'domcontentloaded',
-      timeout: 30000 
+      timeout: 10000 
     });
 
-    // Wait for window.prerenderReady or timeout after 5 seconds
+    // Wait for window.prerenderReady or timeout after 1 second for faster response
     try {
       await page.waitForFunction(
         () => window.prerenderReady === true,
-        { timeout: 5000 }
+        { timeout: 1000 }
       );
     } catch (timeoutError) {
       // Continue if prerenderReady is not set within timeout
       console.log('prerenderReady not detected, proceeding with render');
     }
 
-    // Additional wait for network to be mostly idle (wait for 2 seconds of no network activity)
-    try {
-      await page.waitForFunction(() => true, { timeout: 2000 });
-    } catch {
-      console.log('Additional wait completed, proceeding with render');
-    }
+    // Brief additional wait (500ms) for any pending renders
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     // Check for prerender status code meta tag
     const statusCodeMeta = await page.$eval(
@@ -152,30 +151,35 @@ export default async (req: Request, context: Context) => {
       (el) => el?.getAttribute('content')
     ).catch(() => null);
 
-    // Clean up any open dialogs or alerts that might interfere
-    await page.evaluate(() => {
-      // Remove cookie consent banners and modals
-      const selectors = [
-        '[id*="cookie"]', '[class*="cookie"]', '[id*="consent"]', '[class*="consent"]',
-        '[id*="gdpr"]', '[class*="gdpr"]', '.modal', '.popup', '.overlay',
-        '[data-testid*="cookie"]', '[data-cy*="cookie"]'
-      ];
-      
-      selectors.forEach(selector => {
-        const elements = document.querySelectorAll(selector);
-        elements.forEach(el => {
-          if (el instanceof HTMLElement && el.offsetHeight > 0) {
-            el.remove();
-          }
+    // Clean up any open dialogs or alerts that might interfere (skip in fast mode)
+    if (!fastMode) {
+      await page.evaluate(() => {
+        // Remove cookie consent banners and modals
+        const selectors = [
+          '[id*="cookie"]', '[class*="cookie"]', '[id*="consent"]', '[class*="consent"]',
+          '[id*="gdpr"]', '[class*="gdpr"]', '.modal', '.popup', '.overlay',
+          '[data-testid*="cookie"]', '[data-cy*="cookie"]'
+        ];
+        
+        selectors.forEach(selector => {
+          const elements = document.querySelectorAll(selector);
+          elements.forEach(el => {
+            if (el instanceof HTMLElement && el.offsetHeight > 0) {
+              el.remove();
+            }
+          });
         });
       });
-    });
+    }
 
     // Get the rendered HTML
     const html = await page.content();
     
     // Clean up page resources
     await page.close();
+    
+    const renderTime = Date.now() - startTime;
+    console.log(`Prerender completed in ${renderTime}ms for ${targetUrl}`);
 
     // Handle different status codes and enhanced caching
     let statusCode = 200;
@@ -186,23 +190,8 @@ export default async (req: Request, context: Context) => {
       'X-Prerender-Timestamp': new Date().toISOString(),
     };
 
-    // Set default caching based on content analysis
-    const isStaticContent = !html.includes('prerenderReady') && !html.includes('window.prerenderReady');
-    const hasUserSpecificContent = html.includes('user') || html.includes('login') || html.includes('auth');
-    
-    if (hasUserSpecificContent) {
-      // Short cache for user-specific content
-      headers['Netlify-CDN-Cache-Control'] = 'public, max-age=300, stale-while-revalidate=600';
-      headers['Cache-Control'] = 'public, max-age=60, stale-while-revalidate=300';
-    } else if (isStaticContent) {
-      // Long cache for static content
-      headers['Netlify-CDN-Cache-Control'] = 'public, max-age=604800, stale-while-revalidate=86400, durable';
-      headers['Cache-Control'] = 'public, max-age=86400, stale-while-revalidate=604800';
-    } else {
-      // Medium cache for dynamic content
-      headers['Netlify-CDN-Cache-Control'] = 'public, max-age=86400, stale-while-revalidate=604800, durable';
-      headers['Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=86400';
-    }
+    headers['Netlify-CDN-Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=604800, durable';
+    headers['Cache-Control'] = 'public, max-age=0, must-revalidate';
 
     if (statusCodeMeta) {
       const code = parseInt(statusCodeMeta, 10);
@@ -242,5 +231,6 @@ export default async (req: Request, context: Context) => {
 };
 
 export const config: Config = {
-  path: "/api/prerender"
+  path: "/api/prerender",
+  schedule: undefined
 };

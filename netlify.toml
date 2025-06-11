@@ -2,6 +2,10 @@
   command = "npm run build"
   publish = "dist"
 
+[functions]
+  # Increase timeout for prerender function
+  timeout = 10
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

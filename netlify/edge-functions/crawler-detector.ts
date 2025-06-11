@@ -34,14 +34,14 @@ const CRAWLER_USER_AGENTS = [
 
 const isCrawler = (userAgent: string): boolean => {
   if (!userAgent) return false;
-  
+
   const ua = userAgent.toLowerCase();
   return CRAWLER_USER_AGENTS.some(bot => ua.includes(bot));
 };
 
 const isPrerenderRequest = (url: URL): boolean => {
   // Check for common prerender query parameters
-  return url.searchParams.has('_escaped_fragment_') || 
+  return url.searchParams.has('_escaped_fragment_') ||
          url.searchParams.has('prerender') ||
          url.hash === '#!';
 };
@@ -49,24 +49,24 @@ const isPrerenderRequest = (url: URL): boolean => {
 export default async (req: Request, context: Context) => {
   const url = new URL(req.url);
   const userAgent = req.headers.get('user-agent') || '';
-  
+
   // Skip processing for non-HTML requests
   const acceptHeader = req.headers.get('accept') || '';
   if (!acceptHeader.includes('text/html')) {
-    return context.next();
+    return
   }
-  
+
   // Skip for API routes, assets, and static files
-  if (url.pathname.startsWith('/api/') || 
+  if (url.pathname.startsWith('/api/') ||
       url.pathname.startsWith('/_next/') ||
       url.pathname.startsWith('/static/') ||
       url.pathname.includes('.') && !url.pathname.endsWith('.html')) {
-    return context.next();
+    return
   }
-  
+
   // Check if this is a crawler or prerender request
   const shouldPrerender = isCrawler(userAgent) || isPrerenderRequest(url);
-  
+
   if (shouldPrerender) {
     // Construct the prerender URL
     const prerenderUrl = new URL('/api/prerender', req.url);
@@ -91,9 +91,9 @@ export default async (req: Request, context: Context) => {
       return context.next();
     }
   }
-  
+
   // For regular users, serve the normal page
-  return context.next();
+  return
 };
 
 export const config: Config = {

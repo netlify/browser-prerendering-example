@@ -1,0 +1,29 @@
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.datetime-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  gap: 2rem;
+}
+
+.date-display {
+  font-size: 4rem;
+  font-weight: bold;
+  color: #646cff;
+  line-height: 1.2;
+}
+
+.time-display {
+  font-size: 6rem;
+  font-weight: bold;
+  color: #61dafb;
+  font-family: 'Monaco', 'Consolas', monospace;
+}

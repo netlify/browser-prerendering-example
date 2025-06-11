@@ -39,6 +39,7 @@ export default async (req: Request, context: Context) => {
   const requestUrl = req.url;
   const clientIP = context.ip || req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
   const userAgent = req.headers.get('user-agent') || 'unknown';
+  let targetUrl = 'unknown'; // Declare outside try block for error logging
   
   try {
     const targetUrlParam = new URL(req.url).searchParams.get('url');
@@ -52,7 +53,6 @@ export default async (req: Request, context: Context) => {
 
     // Security: Prevent open proxy usage by ensuring same host
     const requestHost = new URL(req.url).host;
-    let targetUrl: string;
     
     try {
       const parsedTargetUrl = new URL(targetUrlParam);
@@ -299,7 +299,7 @@ export default async (req: Request, context: Context) => {
     });
   } catch (error) {
     const errorTime = Date.now() - startTime;
-    console.error(`PRERENDER ERROR: ${targetUrl || 'unknown'} | ${errorTime}ms | ${error.message} | IP=${clientIP}`);
+    console.error(`PRERENDER ERROR: ${targetUrl} | ${errorTime}ms | ${error.message} | IP=${clientIP}`);
     console.error(`PRERENDER ERROR STACK: ${error.stack}`);
     return new Response('Prerender failed', { status: 500 });
   }

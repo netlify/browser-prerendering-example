@@ -88,7 +88,7 @@ export default async (req: Request, context: Context) => {
     } catch (error) {
       console.error('Error calling prerender service:', error);
       // Fall back to normal response if prerender fails
-      return context.next();
+      return
     }
   }
 

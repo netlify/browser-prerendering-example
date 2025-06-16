@@ -165,12 +165,15 @@ export default async (req: Request, context: Context) => {
     prerenderUrl.searchParams.set('url', currentUrl.toString());
 
     try {
+      // Get the original user agent for logging/debugging
+      const originalUserAgent = req.headers.get('user-agent') || '';
+      
       // Fetch the prerendered content
       return context.next(new Request(prerenderUrl.toString(), {
         method: 'GET',
         headers: {
           'User-Agent': 'Netlify-Edge-Function',
-          'X-Original-User-Agent': userAgent,
+          'X-Original-User-Agent': originalUserAgent,
           'X-Forwarded-For': req.headers.get('x-forwarded-for') || '',
         }
       }));

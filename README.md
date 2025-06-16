@@ -62,14 +62,20 @@ const isCrawler = (userAgent) => {
 
 **Performance Optimizations:**
 - **Request interception** blocks tracking scripts and ads
-- **Fast mode** (`?fast=true`) skips heavy processing
-- **Image skipping** (`?skipImages=true`) for faster rendering
 - **DOM cleanup** removes cookie banners and modals
+- **Network request monitoring** waits for content to fully load
+- **Intelligent timing** balances completeness with performance
 
-**Prerender.io Best Practices:**
+**SPA Readiness Detection:**
+- **`window.prerenderReady`** - Apps can signal when content is ready
+- **Request tracking fallback** - Monitors network activity when prerenderReady not used
+- **Smart timeouts** - 9-second maximum wait prevents indefinite hanging
+- **Dual strategy** - Handles both modern SPAs and static content
+
+**Prerender.io Compatibility:**
 - **Status code handling** via `<meta name="prerender-status-code" content="404">`
 - **Redirect support** via `<meta name="prerender-header" content="Location: /new-url">`
-- **`window.prerenderReady`** detection for SPA readiness
+- **Legacy crawler support** via `_escaped_fragment_` parameter
 - **Content-based caching** strategies
 
 ### 3. Durable Caching Strategy
@@ -157,14 +163,16 @@ const isPrivateNetwork =
 ### URL Parameters
 
 - `?prerender=true` - Force prerendering for testing
-- `?fast=true` - Skip request interception and DOM cleanup
-- `?skipImages=true` - Block images for faster rendering
+- `?_escaped_fragment_=` - Legacy crawler parameter (also forces prerendering)
 
 ### Example Requests
 
 ```bash
-# Force prerender with optimization
-curl "https://your-site.netlify.app/?prerender=true&fast=true&skipImages=true"
+# Force prerender
+curl "https://your-site.netlify.app/?prerender=true"
+
+# Legacy crawler format
+curl "https://your-site.netlify.app/?_escaped_fragment_="
 
 # Test specific page
 curl -H "User-Agent: Googlebot" "https://your-site.netlify.app/about"
@@ -174,7 +182,7 @@ curl -H "User-Agent: Googlebot" "https://your-site.netlify.app/about"
 
 ### Success Logs
 ```
-PRERENDER SUCCESS: https://site.com/page | 1234ms total (567ms nav) | 200 status | 45678B HTML | prerenderReady=false | fastMode=true | skipImages=false | requests=15/23 | domCleanup=3 | IP=1.2.3.4
+PRERENDER SUCCESS: https://site.com/page | 1234ms total (567ms nav, 890ms wait) | 200 status | 45678B HTML | prerenderReady=true | requests=15/18 (0 pending) | domCleanup=3 | IP=1.2.3.4
 ```
 
 ### Error Logs
@@ -226,7 +234,74 @@ PRERENDER ERROR STACK: [full stack trace]
 ### Cost Optimization
 - Intelligent caching reduces function invocations
 - Request blocking reduces network usage
-- Fast mode for simple pages
+- Smart timeouts prevent runaway functions
+
+## 🧪 Testing Suite
+
+This demo includes a comprehensive testing suite to demonstrate different prerendering scenarios:
+
+### Test Pages
+
+1. **`/test-prerender-ready-fast.html`** - Tests `window.prerenderReady` with quick (1s) completion
+2. **`/test-prerender-ready-timeout.html`** - Tests timeout behavior when `prerenderReady` never triggers
+3. **`/test-request-tracking.html`** - Tests fallback request monitoring without `prerenderReady`
+4. **`/test-status-code-404.html`** - Tests custom HTTP status codes via meta tags
+5. **`/test-redirect.html`** - Tests HTTP redirects via meta tags
+
+### Test Suite Dashboard
+
+Visit `/test-index.html` for an interactive test dashboard with:
+- **Visual test cards** for each scenario
+- **Browser testing links** - Click "🤖 Test Prerender" to trigger prerendering in your browser
+- **Copy-paste curl commands** for command-line testing
+- **Expected timing and behavior** for each test
+
+### How to Test
+
+**Browser Testing:**
+- **Normal view**: See the regular browser experience
+- **Prerender view**: Add `?_escaped_fragment_=` to trigger prerendering
+
+**Command Line Testing:**
+```bash
+# Test as Googlebot (triggers prerendering)
+curl -H "User-Agent: Googlebot" "https://your-site.netlify.app/test-prerender-ready-fast.html"
+
+# Test timing scenarios
+time curl -H "User-Agent: Googlebot" "https://your-site.netlify.app/test-prerender-ready-timeout.html"
+
+# Test status codes
+curl -I -H "User-Agent: Googlebot" "https://your-site.netlify.app/test-status-code-404.html"
+
+# Test redirects  
+curl -I -H "User-Agent: Googlebot" "https://your-site.netlify.app/test-redirect.html"
+```
+
+### window.prerenderReady Explained
+
+**How it works:**
+```javascript
+// In your SPA, signal when content is ready
+window.prerenderReady = false; // Initial state
+
+// After your app finishes loading/rendering
+setTimeout(() => {
+  window.prerenderReady = true; // Signals prerender completion
+}, 1000);
+```
+
+**Behavior:**
+- **When used**: Prerender function waits for `prerenderReady = true` (up to 9s timeout)
+- **When not used**: Falls back to monitoring network requests (waits 500ms after last request)
+- **Best practice**: Set to `true` when your SPA content is fully rendered and ready for crawlers
+
+### Testing Documentation
+
+See `/TESTING.md` for comprehensive testing instructions, including:
+- Detailed test scenarios and expected results
+- Performance benchmarks and timing expectations
+- Troubleshooting guides for common issues
+- Advanced testing techniques and automation scripts
 
 ## Troubleshooting
 
@@ -238,9 +313,9 @@ PRERENDER ERROR STACK: [full stack trace]
 - Verify production environment variables
 
 **Timeout errors:**
-- Enable fast mode: `?fast=true`
-- Reduce wait times for `window.prerenderReady`
-- Check navigation performance
+- Check if `window.prerenderReady` is being set properly
+- Verify network requests are completing
+- Monitor function logs for timing details
 
 **Open proxy abuse:**
 - Host validation should block external URLs

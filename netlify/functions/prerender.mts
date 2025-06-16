@@ -106,6 +106,7 @@ export default async (req: Request, context: Context) => {
     let allowedCount = 0;
     let numRequestsInFlight = 0;
     let lastRequestReceivedAt = Date.now();
+    const requests: { [requestId: string]: string } = {}; // Track requests by ID
     
     page.on('request', (request) => {
       const url = request.url();
@@ -133,20 +134,30 @@ export default async (req: Request, context: Context) => {
         request.abort();
       } else {
         allowedCount++;
+        // Increment on request start (Prerender.io pattern)
         numRequestsInFlight++;
+        requests[request.url()] = url; // Track by URL since Puppeteer doesn't expose requestId easily
         request.continue();
       }
     });
 
-    // Track request completion for network activity monitoring
-    page.on('requestfinished', () => {
-      numRequestsInFlight = Math.max(0, numRequestsInFlight - 1);
-      lastRequestReceivedAt = Date.now();
+    // Track request completion for network activity monitoring (Prerender.io pattern)
+    page.on('requestfinished', (request) => {
+      const url = request.url();
+      if (requests[url]) {
+        numRequestsInFlight = Math.max(0, numRequestsInFlight - 1);
+        lastRequestReceivedAt = Date.now();
+        delete requests[url];
+      }
     });
 
-    page.on('requestfailed', () => {
-      numRequestsInFlight = Math.max(0, numRequestsInFlight - 1);
-      lastRequestReceivedAt = Date.now();
+    page.on('requestfailed', (request) => {
+      const url = request.url();
+      if (requests[url]) {
+        numRequestsInFlight = Math.max(0, numRequestsInFlight - 1);
+        lastRequestReceivedAt = Date.now();
+        delete requests[url];
+      }
     });
 
     // Set a reasonable viewport

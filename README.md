@@ -28,20 +28,34 @@ Serverless Function    →  Static Site
 
 ## Key Components
 
-### 1. Edge Function: Crawler Detection (`netlify/edge-functions/crawler-detector.ts`)
+### 1. Edge Function: Enhanced Crawler Detection (`netlify/edge-functions/crawler-detector.ts`)
 
-**Purpose:** Detect bots and crawlers at the edge and route them to prerendering.
+**Purpose:** Comprehensive bot and crawler detection at the edge with production-grade filtering.
 
 **Features:**
-- User-agent based crawler detection (Googlebot, Bingbot, etc.)
-- Support for `?prerender=true` override
-- Fast edge-based routing with minimal latency
-- Handles `_escaped_fragment_` for legacy crawlers
+- **70+ User agents** including AI bots (GPTBot, ClaudeBot, PerplexityBot)
+- **Smart HTML request detection** based on file extensions and patterns
+- **Accept header validation** ensures requests want HTML content
+- **GET method filtering** - only processes GET requests
+- **Anti-abuse measures** - user agent length limits and "Prerender" exclusion
+- **Legacy crawler support** via `_escaped_fragment_` parameter
+- **Font asset filtering** - prevents unnecessary `.woff2` prerendering
 
-**How it works:**
+**Enhanced Detection Logic:**
 ```typescript
-const isCrawler = (userAgent) => {
-  return /googlebot|bingbot|slurp|duckduckbot|baiduspider|yandexbot|facebookexternalhit|twitterbot|rogerbot|linkedinbot|embedly|quora link preview|showyoubot|outbrain|pinterest|slackbot|vkShare|W3C_Validator/i.test(userAgent);
+const isCrawlerRequest = (req: Request): boolean => {
+  if (req.method !== 'GET') return false;
+  
+  const url = new URL(req.url);
+  if (url.searchParams.has('_escaped_fragment_')) return true;
+  
+  const userAgent = req.headers.get('user-agent') || '';
+  if (!userAgent || userAgent === 'Prerender' || userAgent.length > 4096) {
+    return false;
+  }
+  
+  const ua = userAgent.toLowerCase();
+  return CRAWLER_USER_AGENTS.some(bot => ua.includes(bot));
 };
 ```
 
@@ -242,11 +256,12 @@ This demo includes a comprehensive testing suite to demonstrate different preren
 
 ### Test Pages
 
-1. **`/test-prerender-ready-fast.html`** - Tests `window.prerenderReady` with quick (1s) completion
-2. **`/test-prerender-ready-timeout.html`** - Tests timeout behavior when `prerenderReady` never triggers
-3. **`/test-request-tracking.html`** - Tests fallback request monitoring without `prerenderReady`
-4. **`/test-status-code-404.html`** - Tests custom HTTP status codes via meta tags
-5. **`/test-redirect.html`** - Tests HTTP redirects via meta tags
+1. **`/test-crawler-detection.html`** - Tests enhanced crawler detection with 70+ user agents and edge cases
+2. **`/test-prerender-ready-fast.html`** - Tests `window.prerenderReady` with quick (1s) completion
+3. **`/test-prerender-ready-timeout.html`** - Tests timeout behavior when `prerenderReady` never triggers
+4. **`/test-request-tracking.html`** - Tests fallback request monitoring without `prerenderReady`
+5. **`/test-status-code-404.html`** - Tests custom HTTP status codes via meta tags
+6. **`/test-redirect.html`** - Tests HTTP redirects via meta tags
 
 ### Test Suite Dashboard
 
@@ -264,6 +279,10 @@ Visit `/test-index.html` for an interactive test dashboard with:
 
 **Command Line Testing:**
 ```bash
+# Test enhanced crawler detection
+curl -H "User-Agent: GPTBot/1.0" "https://your-site.netlify.app/test-crawler-detection.html"
+curl -H "User-Agent: ClaudeBot/1.0" "https://your-site.netlify.app/test-crawler-detection.html"
+
 # Test as Googlebot (triggers prerendering)
 curl -H "User-Agent: Googlebot" "https://your-site.netlify.app/test-prerender-ready-fast.html"
 
@@ -275,6 +294,11 @@ curl -I -H "User-Agent: Googlebot" "https://your-site.netlify.app/test-status-co
 
 # Test redirects  
 curl -I -H "User-Agent: Googlebot" "https://your-site.netlify.app/test-redirect.html"
+
+# Test edge cases (should NOT prerender)
+curl -X POST -H "User-Agent: Googlebot" "https://your-site.netlify.app/"  # POST method
+curl -H "User-Agent: Prerender" "https://your-site.netlify.app/"  # Excluded UA
+curl -H "User-Agent: Googlebot" "https://your-site.netlify.app/font.woff2"  # Font file
 ```
 
 ### window.prerenderReady Explained

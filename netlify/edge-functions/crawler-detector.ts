@@ -1,71 +1,160 @@
 import type { Context, Config } from "@netlify/edge-functions";
 
-// Common crawler user agents
+// Comprehensive crawler user agents (matching Go implementation)
 const CRAWLER_USER_AGENTS = [
-  'googlebot',
-  'bingbot',
-  'slurp', // Yahoo
-  'duckduckbot',
   'baiduspider',
-  'yandexbot',
-  'facebookexternalhit',
   'twitterbot',
+  'facebookexternalhit',
+  'facebot',
+  'rogerbot',
   'linkedinbot',
-  'whatsapp',
-  'telegrambot',
-  'skypeuripreview',
-  'slackbot',
-  'applebot',
-  'discordbot',
-  'redditbot',
-  'pinterestbot',
-  'tumblr',
-  'bitlybot',
   'embedly',
   'quora link preview',
   'showyoubot',
+  'socialflow',
+  'net::curl::simple',
+  'snipcart',
+  'googlebot',
   'outbrain',
-  'pinterest/0.',
-  'developers.google.com/+/web/snippet',
-  'www.google.com/webmasters/tools/richsnippets',
-  'chrome-lighthouse',
-  'lighthouse'
+  'pinterestbot',
+  'pinterest/0',
+  'slackbot',
+  'vkshare',
+  'w3c_validator',
+  'redditbot',
+  'mediapartners-google',
+  'adsbot-google',
+  'parsely',
+  'duckduckbot',
+  'whatsapp',
+  'hatena',
+  'screaming frog seo spider',
+  'bingbot',
+  'sajaribot',
+  'dashlinkpreviews',
+  'discordbot',
+  'ranksonicbot',
+  'lyticsbot',
+  'yandexbot/',
+  'yandexwebmaster/',
+  'naytev-url-scraper',
+  'newspicksbot/',
+  'swiftbot/',
+  'mattermost',
+  'applebot/',
+  'snapchat',
+  'viber',
+  'proximic',
+  'iframely/',
+  'upday',
+  'google web preview',
+  'ahrefsbot/',
+  'ahrefssiteaudit/',
+  'googlesites',
+  'petalbot',
+  'taboolabot/',
+  'google-inspectiontool/',
+  'trueanthem/',
+  'mattermost-bot/',
+  'microsoftpreview/',
+  'zoombot',
+  'zendesk/external-content',
+  'discourse forum onebox v',
+  'mastodon/',
+  'siteauditbot/',
+  'semrushbot-ba',
+  'semrushbot-si/',
+  'semrushbot-swa/',
+  'semrushbot-ocob/',
+  'gptbot',
+  'chatgpt-user',
+  'oai-searchbot',
+  'perplexitybot',
+  'claudebot',
+  'dotbot'
 ];
 
-const isCrawler = (userAgent: string): boolean => {
-  if (!userAgent) return false;
+const isHTMLRequest = (path: string): boolean => {
+  const lastDot = path.lastIndexOf('.');
+  
+  if (lastDot === -1) {
+    // No extension - assume HTML
+    return true;
+  }
+  
+  const ext = path.substring(lastDot);
+  
+  // Avoid pre-rendering font assets
+  if (ext === '.woff2') {
+    return false;
+  }
+  
+  // HTML extensions
+  if (ext === '.html' || ext === '.htm') {
+    return true;
+  }
+  
+  // Any extension longer than 4 characters is assumed to be HTML (query params, etc.)
+  return ext.length > 5;
+};
+
+const acceptsHTML = (acceptHeader: string): boolean => {
+  if (!acceptHeader) {
+    return true;
+  }
+  
+  return acceptHeader.includes('text/html') ||
+         acceptHeader.includes('text/*') ||
+         acceptHeader.includes('*/*');
+};
+
+const isCrawlerRequest = (req: Request): boolean => {
+  // Only GET requests
+  if (req.method !== 'GET') {
+    return false;
+  }
+  
+  const url = new URL(req.url);
+  
+  // Check for _escaped_fragment_ parameter
+  if (url.searchParams.has('_escaped_fragment_')) {
+    return true;
+  }
+  
+  const userAgent = req.headers.get('user-agent') || '';
+  
+  // Exclude empty, "Prerender", or excessively long user agents
+  if (!userAgent || userAgent === 'Prerender' || userAgent.length > 4096) {
+    return false;
+  }
   
   const ua = userAgent.toLowerCase();
   return CRAWLER_USER_AGENTS.some(bot => ua.includes(bot));
 };
 
-const isPrerenderRequest = (url: URL): boolean => {
-  // Check for common prerender query parameters
-  return url.searchParams.has('_escaped_fragment_') || 
-         url.searchParams.has('prerender') ||
-         url.hash === '#!';
-};
-
 export default async (req: Request, context: Context) => {
   const url = new URL(req.url);
-  const userAgent = req.headers.get('user-agent') || '';
   
-  // Skip processing for non-HTML requests
-  const acceptHeader = req.headers.get('accept') || '';
-  if (!acceptHeader.includes('text/html')) {
+  // Enhanced HTML request detection (matching Go logic)
+  if (!isHTMLRequest(url.pathname)) {
     return context.next();
   }
   
-  // Skip for API routes, assets, and static files
+  // Enhanced Accept header validation
+  const acceptHeader = req.headers.get('accept') || '';
+  if (!acceptsHTML(acceptHeader)) {
+    return context.next();
+  }
+  
+  // Skip for API routes and specific patterns
   if (url.pathname.startsWith('/api/') || 
       url.pathname.startsWith('/_next/') ||
-      url.pathname.startsWith('/static/') ||
-      url.pathname.includes('.') && !url.pathname.endsWith('.html')) {
+      url.pathname.startsWith('/static/')) {
     return context.next();
   }
   
-  // Check if this is a crawler or prerender request
-  const shouldPrerender = isCrawler(userAgent) || isPrerenderRequest(url);
+  // Check if this is a crawler request (comprehensive logic)
+  const shouldPrerender = isCrawlerRequest(req) || url.searchParams.has('prerender');
   
   if (shouldPrerender) {
     // Construct the prerender URL

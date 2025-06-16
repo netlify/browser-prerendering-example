@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Enhanced Crawler Detection</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #20c997 0%, #28a745 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        .test-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        .test-card {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 4px solid #ffc107;
+        }
+        .curl-command {
+            background: rgba(0,0,0,0.3);
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 0.8em;
+            margin: 10px 0;
+            word-break: break-all;
+        }
+        .features {
+            background: rgba(0,0,0,0.2);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        .user-agents {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .ua-category {
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            border-radius: 8px;
+        }
+        .ua-category h4 {
+            margin-top: 0;
+            color: #ffc107;
+        }
+        .ua-list {
+            font-family: monospace;
+            font-size: 0.9em;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 Test: Enhanced Crawler Detection</h1>
+        <p>This page demonstrates the comprehensive crawler detection logic adapted from Netlify's Go implementation.</p>
+        
+        <div class="features">
+            <h3>🔍 Enhanced Detection Features</h3>
+            <ul>
+                <li><strong>70+ User Agents</strong> - Comprehensive list including AI bots (GPTBot, ClaudeBot, etc.)</li>
+                <li><strong>GET Method Only</strong> - Only processes GET requests</li>
+                <li><strong>HTML Request Detection</strong> - Smart file extension analysis</li>
+                <li><strong>Accept Header Validation</strong> - Ensures request accepts HTML content</li>
+                <li><strong>User Agent Length Limits</strong> - Rejects UAs over 4096 characters</li>
+                <li><strong>Anti-Spoofing</strong> - Excludes "Prerender" user agent</li>
+                <li><strong>Legacy Support</strong> - _escaped_fragment_ parameter detection</li>
+            </ul>
+        </div>
+        
+        <h2>🧪 Test Different User Agents</h2>
+        
+        <div class="test-grid">
+            <div class="test-card">
+                <h3>Search Engines</h3>
+                <div class="curl-command">
+                    curl -H "User-Agent: Googlebot/2.1" "https://your-site.netlify.app/test-crawler-detection.html"
+                </div>
+                <div class="curl-command">
+                    curl -H "User-Agent: bingbot/2.0" "https://your-site.netlify.app/test-crawler-detection.html"
+                </div>
+                <div class="curl-command">
+                    curl -H "User-Agent: DuckDuckBot-Https/1.1" "https://your-site.netlify.app/test-crawler-detection.html"
+                </div>
+            </div>
+            
+            <div class="test-card">
+                <h3>Social Media</h3>
+                <div class="curl-command">
+                    curl -H "User-Agent: facebookexternalhit/1.1" "https://your-site.netlify.app/test-crawler-detection.html"
+                </div>
+                <div class="curl-command">
+                    curl -H "User-Agent: Twitterbot/1.0" "https://your-site.netlify.app/test-crawler-detection.html"
+                </div>
+                <div class="curl-command">
+                    curl -H "User-Agent: LinkedInBot/1.0" "https://your-site.netlify.app/test-crawler-detection.html"
+                </div>
+            </div>
+            
+            <div class="test-card">
+                <h3>AI Bots (New!)</h3>
+                <div class="curl-command">
+                    curl -H "User-Agent: GPTBot/1.0" "https://your-site.netlify.app/test-crawler-detection.html"
+                </div>
+                <div class="curl-command">
+                    curl -H "User-Agent: ClaudeBot/1.0" "https://your-site.netlify.app/test-crawler-detection.html"
+                </div>
+                <div class="curl-command">
+                    curl -H "User-Agent: PerplexityBot/1.0" "https://your-site.netlify.app/test-crawler-detection.html"
+                </div>
+            </div>
+            
+            <div class="test-card">
+                <h3>SEO Tools</h3>
+                <div class="curl-command">
+                    curl -H "User-Agent: AhrefsBot/7.0" "https://your-site.netlify.app/test-crawler-detection.html"
+                </div>
+                <div class="curl-command">
+                    curl -H "User-Agent: SemrushBot/7" "https://your-site.netlify.app/test-crawler-detection.html"
+                </div>
+                <div class="curl-command">
+                    curl -H "User-Agent: Screaming Frog SEO Spider/1.0" "https://your-site.netlify.app/test-crawler-detection.html"
+                </div>
+            </div>
+        </div>
+        
+        <div class="features">
+            <h3>🧪 Edge Cases to Test</h3>
+            <div class="test-grid">
+                <div class="test-card">
+                    <h4>Should NOT Prerender</h4>
+                    <div class="curl-command">
+                        # POST request (should skip)
+                        curl -X POST -H "User-Agent: Googlebot" "https://your-site.netlify.app/test-crawler-detection.html"
+                    </div>
+                    <div class="curl-command">
+                        # "Prerender" user agent (should skip)
+                        curl -H "User-Agent: Prerender" "https://your-site.netlify.app/test-crawler-detection.html"
+                    </div>
+                    <div class="curl-command">
+                        # Font file (should skip)
+                        curl -H "User-Agent: Googlebot" "https://your-site.netlify.app/font.woff2"
+                    </div>
+                    <div class="curl-command">
+                        # Non-HTML Accept header
+                        curl -H "User-Agent: Googlebot" -H "Accept: application/json" "https://your-site.netlify.app/test-crawler-detection.html"
+                    </div>
+                </div>
+                
+                <div class="test-card">
+                    <h4>SHOULD Prerender</h4>
+                    <div class="curl-command">
+                        # _escaped_fragment_ parameter
+                        curl "https://your-site.netlify.app/test-crawler-detection.html?_escaped_fragment_="
+                    </div>
+                    <div class="curl-command">
+                        # Force prerender parameter
+                        curl "https://your-site.netlify.app/test-crawler-detection.html?prerender=true"
+                    </div>
+                    <div class="curl-command">
+                        # No extension (assumes HTML)
+                        curl -H "User-Agent: Googlebot" "https://your-site.netlify.app/some-page"
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="user-agents">
+            <div class="ua-category">
+                <h4>🔍 Search Engines</h4>
+                <div class="ua-list">
+                    googlebot<br>
+                    bingbot<br>
+                    duckduckbot<br>
+                    baiduspider<br>
+                    yandexbot<br>
+                </div>
+            </div>
+            
+            <div class="ua-category">
+                <h4>📱 Social Media</h4>
+                <div class="ua-list">
+                    facebookexternalhit<br>
+                    twitterbot<br>
+                    linkedinbot<br>
+                    whatsapp<br>
+                    snapchat<br>
+                    discordbot<br>
+                </div>
+            </div>
+            
+            <div class="ua-category">
+                <h4>🤖 AI & Chat Bots</h4>
+                <div class="ua-list">
+                    gptbot<br>
+                    chatgpt-user<br>
+                    claudebot<br>
+                    perplexitybot<br>
+                    oai-searchbot<br>
+                </div>
+            </div>
+            
+            <div class="ua-category">
+                <h4>📊 SEO & Analytics</h4>
+                <div class="ua-list">
+                    ahrefsbot<br>
+                    semrushbot-*<br>
+                    screaming frog seo<br>
+                    parsely<br>
+                    lyticsbot<br>
+                </div>
+            </div>
+            
+            <div class="ua-category">
+                <h4>💬 Messaging & Preview</h4>
+                <div class="ua-list">
+                    slackbot<br>
+                    mattermost<br>
+                    dashlinkpreviews<br>
+                    embedly<br>
+                    iframely<br>
+                </div>
+            </div>
+            
+            <div class="ua-category">
+                <h4>📰 Content & News</h4>
+                <div class="ua-list">
+                    outbrain<br>
+                    taboolabot<br>
+                    upday<br>
+                    newspicksbot<br>
+                    trueanthem<br>
+                </div>
+            </div>
+        </div>
+        
+        <div style="margin-top: 30px; padding: 20px; background: rgba(0,0,0,0.2); border-radius: 10px;">
+            <h3>📝 What's New vs Previous Implementation</h3>
+            <ul>
+                <li><strong>+40 new user agents</strong> including AI bots and modern crawlers</li>
+                <li><strong>Smarter HTML detection</strong> based on file extensions</li>
+                <li><strong>Accept header validation</strong> ensures requests want HTML</li>
+                <li><strong>Method filtering</strong> - only GET requests are processed</li>
+                <li><strong>Anti-abuse measures</strong> - length limits and "Prerender" exclusion</li>
+                <li><strong>Better font/asset filtering</strong> - prevents unnecessary prerendering</li>
+            </ul>
+        </div>
+        
+        <div style="margin-top: 20px; text-align: center; opacity: 0.8;">
+            <p><a href="/test-index.html" style="color: #ffc107;">← Back to Test Suite</a></p>
+        </div>
+    </div>
+    
+    <script>
+        console.log('🤖 Enhanced crawler detection test page loaded');
+        console.log('🔍 This page tests 70+ user agents and smart HTML detection');
+        
+        // Replace placeholder URLs with actual domain
+        if (window.location.hostname !== 'localhost') {
+            const commands = document.querySelectorAll('.curl-command');
+            commands.forEach(cmd => {
+                cmd.textContent = cmd.textContent.replace('your-site.netlify.app', window.location.hostname);
+            });
+        }
+        
+        // Display detected crawler info
+        const isCrawlerUA = window.navigator.userAgent.toLowerCase();
+        const knownCrawlers = ['googlebot', 'bingbot', 'facebookexternalhit', 'twitterbot', 'linkedinbot'];
+        const detectedCrawler = knownCrawlers.find(bot => isCrawlerUA.includes(bot));
+        
+        if (detectedCrawler) {
+            console.log(`🤖 Detected crawler: ${detectedCrawler}`);
+        } else {
+            console.log('👤 Regular user agent detected');
+        }
+        
+        // Check for prerender indicators
+        if (window.__PRERENDER__) {
+            console.log('✅ Page is being prerendered');
+        }
+        
+        if (window.location.search.includes('_escaped_fragment_')) {
+            console.log('🔗 _escaped_fragment_ parameter detected');
+        }
+    </script>
+</body>
+</html>

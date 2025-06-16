@@ -12,38 +12,24 @@ declare global {
 let browser: any = null;
 
 async function getBrowser() {
-  if (!browser) {
-    // Check if running in Netlify/AWS Lambda environment
-    const isProduction = process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY || process.env.NODE_ENV === 'production';
-    
-    // Debug logging
-    console.log('Environment check:', {
-      AWS_LAMBDA_FUNCTION_NAME: process.env.AWS_LAMBDA_FUNCTION_NAME,
-      NETLIFY: process.env.NETLIFY,
-      NODE_ENV: process.env.NODE_ENV,
-      isProduction
-    });
-    
-    if (isProduction) {
-      // Production - use sparticuz/chromium for Netlify/Lambda
-      console.log('Production environment detected, using @sparticuz/chromium');
-      const executablePath = await chromium.executablePath();
-      console.log('Chrome executable path:', executablePath);
-      
-      browser = await puppeteer.launch({
-        args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
-        defaultViewport: chromium.defaultViewport,
-        executablePath: executablePath,
-        headless: chromium.headless,
-      });
-    } else {
-      // Local development - use bundled Chromium
-      console.log('Local development environment detected, using bundled Chromium');
-      browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-      });
+  if (!browser) {    
+    let args = {
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
     }
+    
+    if (!process.env.NETLIFY_DEV) {
+      console.log("Not local dev, using sparticuz/chromium")
+      const executablePath = await chromium.executablePath();
+      const lambdaArgs = {
+        defaultViewport: chromium.defaultViewport,
+        executablePath: executablePath
+      }
+
+      args = {...args, ...lambdaArgs}
+    }
+
+    browser = await puppeteer.launch(args);
   }
   
   return browser;
@@ -51,15 +37,11 @@ async function getBrowser() {
 
 export default async (req: Request, context: Context) => {
   const startTime = Date.now();
-  const requestUrl = req.url;
   const clientIP = context.ip || req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
-  const userAgent = req.headers.get('user-agent') || 'unknown';
   let targetUrl = 'unknown'; // Declare outside try block for error logging
   
   try {
     const targetUrlParam = new URL(req.url).searchParams.get('url');
-    const skipImages = new URL(req.url).searchParams.get('skipImages') === 'true';
-    const fastMode = new URL(req.url).searchParams.get('fast') === 'true';
     
     if (!targetUrlParam) {
       console.error('PRERENDER ERROR: Missing url parameter');
@@ -118,67 +100,60 @@ export default async (req: Request, context: Context) => {
 
     // Set prerender user agent for consistent behavior
     await page.setUserAgent('Mozilla/5.0 (compatible; Prerender)');
-    
-    // Set up request interception for performance and clean rendering
-    if (!fastMode) {
-      await page.setRequestInterception(true);
-    }
+    await page.setRequestInterception(true);
     
     let blockedCount = 0;
     let allowedCount = 0;
+    let numRequestsInFlight = 0;
+    let lastRequestReceivedAt = Date.now();
     
-    if (!fastMode) {
-      page.on('request', (request) => {
-        const url = request.url();
-        const resourceType = request.resourceType();
+    page.on('request', (request) => {
+      const url = request.url();
+      const resourceType = request.resourceType();
+      
+      // Block common cookie consent and tracking domains
+      const blockedDomains = [
+        'cookiebot.com',
+        'onetrust.com',
+        'quantcast.com',
+        'cookiepro.com',
+        'trustarc.com',
+        'cookielaw.org',
+        'google-analytics.com',
+        'googletagmanager.com',
+        'facebook.com/tr',
+        'hotjar.com'
+      ];
         
-        // Block common cookie consent and tracking domains
-        const blockedDomains = [
-          'cookiebot.com',
-          'onetrust.com',
-          'quantcast.com',
-          'cookiepro.com',
-          'trustarc.com',
-          'cookielaw.org',
-          'google-analytics.com',
-          'googletagmanager.com',
-          'facebook.com/tr',
-          'hotjar.com'
-        ];
-        
-        // Skip images and CSS if requested for faster rendering
-        if (skipImages && (resourceType === 'image' || resourceType === 'stylesheet')) {
-          blockedCount++;
-          request.abort();
-          return;
-        }
-        
-        // Block tracking pixels and cookie consent scripts
-        if (blockedDomains.some(domain => url.includes(domain)) ||
-            (resourceType === 'image' && (url.includes('track') || url.includes('pixel'))) ||
-            (resourceType === 'script' && (url.includes('cookie') || url.includes('consent')))) {
-          blockedCount++;
-          request.abort();
-        } else {
-          allowedCount++;
-          request.continue();
-        }
-      });
-    }
+      // Block tracking pixels and cookie consent scripts
+      if (blockedDomains.some(domain => url.includes(domain)) ||
+          (resourceType === 'image' && (url.includes('track') || url.includes('pixel'))) ||
+          (resourceType === 'script' && (url.includes('cookie') || url.includes('consent')))) {
+        blockedCount++;
+        request.abort();
+      } else {
+        allowedCount++;
+        numRequestsInFlight++;
+        request.continue();
+      }
+    });
+
+    // Track request completion for network activity monitoring
+    page.on('requestfinished', () => {
+      numRequestsInFlight = Math.max(0, numRequestsInFlight - 1);
+      lastRequestReceivedAt = Date.now();
+    });
+
+    page.on('requestfailed', () => {
+      numRequestsInFlight = Math.max(0, numRequestsInFlight - 1);
+      lastRequestReceivedAt = Date.now();
+    });
 
     // Set a reasonable viewport
     await page.setViewport({ width: 1200, height: 800 });
 
     // Performance optimization: disable unnecessary features
     await page.evaluateOnNewDocument(() => {
-      // Disable service workers during prerender
-      if ('serviceWorker' in navigator) {
-        Object.defineProperty(navigator, 'serviceWorker', {
-          value: undefined,
-          writable: false
-        });
-      }
-      
       // Disable notifications
       if ('Notification' in window) {
         Object.defineProperty(window, 'Notification', {
@@ -204,20 +179,51 @@ export default async (req: Request, context: Context) => {
       throw navigationError;
     }
 
-    // Wait for window.prerenderReady or timeout after 1 second for faster response
-    let prerenderReady = false;
-    try {
-      await page.waitForFunction(
-        () => window.prerenderReady === true,
-        { timeout: 1000 }
-      );
-      prerenderReady = true;
-    } catch (timeoutError) {
-      // Continue if prerenderReady is not set within timeout
+    // Enhanced prerenderReady flow with simplified logic
+    const waitAfterLastRequest = 500; // 500ms wait after last request completes
+    const pageDoneCheckInterval = 100; // Check every 100ms
+    const maxWaitTime = 9000; // Maximum wait time (9 seconds)
+    
+    const waitStart = Date.now();
+    
+    // Core logic: checkIfDone evaluates prerenderReady and request tracking
+    const checkIfDone = async (): Promise<boolean> => {
+      const now = Date.now();
+      const totalWaitTime = now - waitStart;
+      
+      // Always respect maximum timeout
+      if (totalWaitTime >= maxWaitTime) {
+        return true;
+      }
+      
+      // Evaluate window.prerenderReady in page context
+      const currentPrerenderReady = await page.evaluate(() => {
+        return typeof window.prerenderReady === 'boolean' ? window.prerenderReady : null;
+      });
+      
+      // If prerenderReady is being used by the page, it's authoritative
+      if (currentPrerenderReady !== null) {
+        // If prerenderReady is true, we're done immediately
+        if (currentPrerenderReady === true) {
+          return true;
+        }
+        // If prerenderReady is false, wait for it to become true (ignore requests)
+        return false;
+      }
+      
+      // If prerenderReady is not used (null), fall back to request tracking
+      const timeSinceLastRequest = now - lastRequestReceivedAt;
+      const requestsSettled = numRequestsInFlight <= 0 && timeSinceLastRequest >= waitAfterLastRequest;
+      
+      return requestsSettled;
+    };
+    
+    // Polling system: check every pageDoneCheckInterval until done
+    while (!(await checkIfDone())) {
+      await new Promise(resolve => setTimeout(resolve, pageDoneCheckInterval));
     }
-
-    // Brief additional wait (500ms) for any pending renders
-    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    const totalWaitTime = Date.now() - waitStart;
 
     // Check for prerender status code meta tag
     const statusCodeMeta = await page.$eval(
@@ -233,28 +239,26 @@ export default async (req: Request, context: Context) => {
 
     // Clean up any open dialogs or alerts that might interfere (skip in fast mode)
     let removedElements = 0;
-    if (!fastMode) {
-      removedElements = await page.evaluate(() => {
-        // Remove cookie consent banners and modals
-        const selectors = [
-          '[id*="cookie"]', '[class*="cookie"]', '[id*="consent"]', '[class*="consent"]',
-          '[id*="gdpr"]', '[class*="gdpr"]', '.modal', '.popup', '.overlay',
-          '[data-testid*="cookie"]', '[data-cy*="cookie"]'
-        ];
-        
-        let removedCount = 0;
-        selectors.forEach(selector => {
-          const elements = document.querySelectorAll(selector);
-          elements.forEach(el => {
-            if (el instanceof HTMLElement && el.offsetHeight > 0) {
-              el.remove();
-              removedCount++;
-            }
-          });
+    removedElements = await page.evaluate(() => {
+      // Remove cookie consent banners and modals
+      const selectors = [
+        '[id*="cookie"]', '[class*="cookie"]', '[id*="consent"]', '[class*="consent"]',
+        '[id*="gdpr"]', '[class*="gdpr"]', '.modal', '.popup', '.overlay',
+        '[data-testid*="cookie"]', '[data-cy*="cookie"]'
+      ];
+      
+      let removedCount = 0;
+      selectors.forEach(selector => {
+        const elements = document.querySelectorAll(selector);
+        elements.forEach(el => {
+          if (el instanceof HTMLElement && el.offsetHeight > 0) {
+            el.remove();
+            removedCount++;
+          }
         });
-        return removedCount;
       });
-    }
+      return removedCount;
+    });
 
     // Get the rendered HTML
     const html = await page.content();
@@ -277,28 +281,14 @@ export default async (req: Request, context: Context) => {
 
     headers['Netlify-CDN-Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=604800, durable';
     headers['Cache-Control'] = 'public, max-age=0, must-revalidate';
+    headers['Cache-Tags'] = 'nf-prerender';
 
     if (statusCodeMeta) {
       const code = parseInt(statusCodeMeta, 10);
       if (code >= 100 && code < 600) {
         statusCode = code;
-        
-        // Handle redirects
-        if (code >= 300 && code < 400 && redirectMeta) {
-          const locationMatch = redirectMeta.match(/Location:\s*(.+)/i);
-          if (locationMatch) {
-            headers['Location'] = locationMatch[1].trim();
-            // Short cache for redirects
-            headers['Netlify-CDN-Cache-Control'] = 'public, max-age=3600, durable';
-            headers['Cache-Control'] = 'public, max-age=300';
-          }
-        }
-        
-        // Adjust caching for error status codes
-        if (code === 404) {
-          headers['Netlify-CDN-Cache-Control'] = 'public, max-age=3600, durable';
-          headers['Cache-Control'] = 'public, max-age=300';
-        } else if (code >= 500) {
+
+        if (code >= 500) {
           headers['Netlify-CDN-Cache-Control'] = 'no-cache';
           headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
         }
@@ -306,7 +296,11 @@ export default async (req: Request, context: Context) => {
     }
 
     // Single success log line with all important details
-    console.log(`PRERENDER SUCCESS: ${targetUrl} | ${renderTime}ms total (${navigationTime}ms nav) | ${statusCode} status | ${htmlSize}B HTML | prereaderReady=${prerenderReady} | fastMode=${fastMode} | skipImages=${skipImages} | requests=${allowedCount}/${allowedCount + blockedCount} | domCleanup=${removedElements} | IP=${clientIP}`);
+    const finalPrerenderReady = await page.evaluate(() => {
+      return typeof window.prerenderReady === 'boolean' ? window.prerenderReady : null;
+    }).catch(() => null);
+    
+    console.log(`PRERENDER SUCCESS: ${targetUrl} | ${renderTime}ms total (${navigationTime}ms nav, ${totalWaitTime}ms wait) | ${statusCode} status | ${htmlSize}B HTML | prerenderReady=${finalPrerenderReady} | requests=${allowedCount}/${allowedCount + blockedCount} (${numRequestsInFlight} pending) | domCleanup=${removedElements} | IP=${clientIP}`);
     
     return new Response(html, {
       status: statusCode,
@@ -321,6 +315,5 @@ export default async (req: Request, context: Context) => {
 };
 
 export const config: Config = {
-  path: "/api/prerender",
-  schedule: undefined
+  path: "/api/prerender"
 };

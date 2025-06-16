@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: prerenderReady Timeout</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .loading { background: rgba(255, 193, 7, 0.3); }
+        .timeout { background: rgba(220, 53, 69, 0.3); }
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        #content {
+            margin-top: 20px;
+            opacity: 0.7;
+        }
+        .warning {
+            background: rgba(255, 193, 7, 0.2);
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #ffc107;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⏰ Test: prerenderReady Timeout</h1>
+        <p>This page demonstrates <code>window.prerenderReady</code> that never triggers, causing a timeout.</p>
+        
+        <div id="status" class="status loading">
+            <span class="spinner"></span> Loading... prerenderReady = false (will never become true)
+        </div>
+        
+        <div class="warning">
+            <h4>⚠️ Expected Behavior</h4>
+            <p>This page intentionally never sets <code>window.prerenderReady = true</code>. The prerender function should wait for the maximum timeout (9 seconds) and then proceed with the HTML as-is.</p>
+        </div>
+        
+        <div id="content">
+            <h2>Partial Content</h2>
+            <p>This content is immediately available but the page never signals completion.</p>
+            <p>Page loaded at: <span id="timestamp"></span></p>
+            <p>Elapsed time: <span id="elapsed">0</span> seconds</p>
+            
+            <h3>Testing Details</h3>
+            <ul>
+                <li><strong>Expected behavior:</strong> Prerender function should timeout after 9 seconds</li>
+                <li><strong>window.prerenderReady:</strong> Remains false forever</li>
+                <li><strong>Use case:</strong> Broken SPA that never signals readiness</li>
+                <li><strong>Fallback:</strong> Prerender captures whatever HTML is available at timeout</li>
+            </ul>
+            
+            <div style="margin-top: 20px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 5px;">
+                <h4>🧪 Test with:</h4>
+                <code>curl -H "User-Agent: Googlebot" "https://your-site.netlify.app/test-prerender-ready-timeout.html"</code>
+                <p><small>Note: This request will take ~9 seconds to complete due to timeout</small></p>
+            </div>
+            
+            <div style="margin-top: 20px;">
+                <h4>🕐 Timeout Simulation</h4>
+                <p>The page has been running for <strong id="elapsed-display">0</strong> seconds</p>
+                <div id="timeout-messages"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initial state - this will NEVER be set to true
+        window.prerenderReady = false;
+        
+        // Set timestamp immediately
+        const startTime = Date.now();
+        document.getElementById('timestamp').textContent = new Date().toISOString();
+        
+        // Update elapsed time counter
+        let elapsedSeconds = 0;
+        const updateElapsed = () => {
+            elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+            document.getElementById('elapsed').textContent = elapsedSeconds;
+            document.getElementById('elapsed-display').textContent = elapsedSeconds;
+            
+            // Add timeout messages
+            const messagesDiv = document.getElementById('timeout-messages');
+            if (elapsedSeconds === 5) {
+                messagesDiv.innerHTML += '<p>⏳ 5 seconds elapsed - still waiting...</p>';
+            } else if (elapsedSeconds === 9) {
+                messagesDiv.innerHTML += '<p>🚨 9 seconds elapsed - prerender should timeout now!</p>';
+                document.getElementById('status').className = 'status timeout';
+                document.getElementById('status').innerHTML = '🚨 Timeout! prerenderReady never set to true';
+            } else if (elapsedSeconds === 10) {
+                messagesDiv.innerHTML += '<p>✅ Timeout completed - prerender should have captured this HTML</p>';
+            }
+        };
+        
+        setInterval(updateElapsed, 100);
+        
+        // Simulate some ongoing activity to test request tracking
+        let requestCount = 0;
+        const simulateActivity = () => {
+            requestCount++;
+            console.log(`🔄 Simulated activity ${requestCount} - prerenderReady still false`);
+            
+            // Create a dummy image request to test request tracking
+            const img = new Image();
+            img.src = `data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7?t=${Date.now()}`;
+        };
+        
+        // Simulate ongoing activity every 2 seconds
+        setInterval(simulateActivity, 2000);
+        
+        // Debug logging
+        console.log('🚀 Test page loaded - prerenderReady set to false');
+        console.log('⚠️ prerenderReady will NEVER be set to true');
+        console.log('⏰ Expecting prerender to timeout after 9 seconds');
+        
+        // Check if we're being prerendered
+        if (window.__PRERENDER__) {
+            console.log('🤖 Detected prerender environment');
+            console.log('⏰ This page will cause a timeout - prerenderReady will never be true');
+        }
+        
+        // Intentionally never set prerenderReady to true
+        // window.prerenderReady = true; // <-- This line is commented out on purpose!
+    </script>
+</body>
+</html>

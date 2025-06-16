@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Request Tracking Fallback</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: bold;
+            background: rgba(255, 193, 7, 0.3);
+        }
+        .request-log {
+            background: rgba(0,0,0,0.3);
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 0.9em;
+            max-height: 200px;
+            overflow-y: auto;
+            margin: 20px 0;
+        }
+        .test-info {
+            background: rgba(23, 162, 184, 0.2);
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #17a2b8;
+            margin: 20px 0;
+        }
+        .content-section {
+            margin: 20px 0;
+            padding: 15px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 5px;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+        .content-section.loaded {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📡 Test: Request Tracking Fallback</h1>
+        <p>This page demonstrates the fallback behavior when <code>window.prerenderReady</code> is NOT used. The prerender function will wait for network requests to settle.</p>
+        
+        <div class="status" id="status">
+            📡 Loading resources... (no prerenderReady signal)
+        </div>
+        
+        <div class="test-info">
+            <h4>ℹ️ How This Works</h4>
+            <p>Since this page doesn't set <code>window.prerenderReady</code>, the prerender function:</p>
+            <ol>
+                <li>Monitors network requests in flight</li>
+                <li>Waits for requests to settle (500ms after last request)</li>
+                <li>Times out after 9 seconds if requests never settle</li>
+                <li>Captures HTML once network activity is quiet</li>
+            </ol>
+        </div>
+        
+        <div class="request-log" id="request-log">
+            <div>📋 Network Activity Log:</div>
+        </div>
+        
+        <div id="content-1" class="content-section">
+            <h3>Section 1: Immediate Content</h3>
+            <p>This content is available immediately when the page loads.</p>
+            <p>Loaded at: <span id="timestamp-1"></span></p>
+        </div>
+        
+        <div id="content-2" class="content-section">
+            <h3>Section 2: Delayed Content (1s)</h3>
+            <p>This content loads after 1 second, triggering a new request.</p>
+            <p>Loaded at: <span id="timestamp-2"></span></p>
+        </div>
+        
+        <div id="content-3" class="content-section">
+            <h3>Section 3: More Delayed Content (2.5s)</h3>
+            <p>This content loads after 2.5 seconds, extending the wait time.</p>
+            <p>Loaded at: <span id="timestamp-3"></span></p>
+        </div>
+        
+        <div id="content-4" class="content-section">
+            <h3>Section 4: Final Content (3.5s)</h3>
+            <p>This is the last content to load. Prerender should wait until 500ms after this completes.</p>
+            <p>Loaded at: <span id="timestamp-4"></span></p>
+            <p><strong>Expected prerender completion:</strong> ~4 seconds (3.5s + 0.5s settle time)</p>
+        </div>
+        
+        <div style="margin-top: 30px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 5px;">
+            <h4>🧪 Test with:</h4>
+            <code>curl -H "User-Agent: Googlebot" "https://your-site.netlify.app/test-request-tracking.html"</code>
+            <p><small>Should wait ~4 seconds for all requests to complete + settle time</small></p>
+        </div>
+        
+        <div style="margin-top: 20px; font-size: 0.9em; opacity: 0.8;">
+            <p>💡 <strong>Key Point:</strong> This page intentionally does NOT use <code>window.prerenderReady</code> to demonstrate the fallback request tracking behavior.</p>
+        </div>
+    </div>
+
+    <script>
+        // Explicitly do NOT set window.prerenderReady
+        // This forces the prerender function to use request tracking
+        
+        const logElement = document.getElementById('request-log');
+        const statusElement = document.getElementById('status');
+        
+        function log(message) {
+            const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+            logElement.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+            logElement.scrollTop = logElement.scrollHeight;
+            console.log(`📡 ${message}`);
+        }
+        
+        // Set initial timestamp
+        document.getElementById('timestamp-1').textContent = new Date().toISOString();
+        document.getElementById('content-1').classList.add('loaded');
+        log('Initial content loaded');
+        
+        // Simulate loading content with network requests
+        function loadContent(sectionId, delay, description) {
+            setTimeout(() => {
+                // Simulate a network request with a dummy image
+                const img = new Image();
+                img.onload = () => {
+                    log(`${description} - network request completed`);
+                    document.getElementById(`timestamp-${sectionId.split('-')[1]}`).textContent = new Date().toISOString();
+                    document.getElementById(sectionId).classList.add('loaded');
+                    
+                    if (sectionId === 'content-4') {
+                        statusElement.innerHTML = '✅ All content loaded - waiting for network to settle...';
+                        log('All content loaded - prerender should wait 500ms more');
+                    }
+                };
+                img.onerror = img.onload; // Handle both success and failure
+                img.src = `data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7?section=${sectionId}&t=${Date.now()}`;
+                
+                log(`${description} - initiating network request`);
+            }, delay);
+        }
+        
+        // Schedule content loading
+        loadContent('content-2', 1000, 'Section 2 content');
+        loadContent('content-3', 2500, 'Section 3 content');
+        loadContent('content-4', 3500, 'Section 4 content');
+        
+        log('Page initialized - NO prerenderReady signal will be sent');
+        log('Prerender function should wait for network requests to settle');
+        
+        // Check if we're being prerendered
+        if (window.__PRERENDER__) {
+            console.log('🤖 Detected prerender environment');
+            console.log('📡 This page uses request tracking fallback (no prerenderReady)');
+            console.log('⏰ Expected completion: ~4 seconds (3.5s loading + 0.5s settle)');
+        }
+        
+        // Monitor for when we think prerendering should be complete
+        setTimeout(() => {
+            log('🎯 Prerender should be complete around now (4s mark)');
+            statusElement.innerHTML = '🎯 Network should be settled - prerender likely complete';
+        }, 4000);
+        
+        // Intentionally do NOT set window.prerenderReady at any point
+        // This is the key difference from the other test pages
+    </script>
+</body>
+</html>

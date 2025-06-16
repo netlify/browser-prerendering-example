@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prerender Test Suite</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 40px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+        .test-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        .test-card {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 4px solid;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .test-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        .test-card.prerender { border-left-color: #28a745; }
+        .test-card.status { border-left-color: #ffc107; }
+        .test-card.redirect { border-left-color: #17a2b8; }
+        .test-card.tracking { border-left-color: #6f42c1; }
+        
+        .test-card h3 {
+            margin-top: 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .test-card a {
+            color: #ffc107;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .test-card a:hover {
+            text-decoration: underline;
+        }
+        .curl-command {
+            background: rgba(0,0,0,0.3);
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 0.8em;
+            margin: 10px 0;
+            word-break: break-all;
+        }
+        .main-app {
+            text-align: center;
+            margin: 30px 0;
+            padding: 20px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Netlify Prerender Test Suite</h1>
+        <p>This test suite demonstrates different prerendering scenarios using Netlify Edge Functions and Serverless Functions with Puppeteer.</p>
+        
+        <div class="main-app">
+            <h2>📱 Main Demo App</h2>
+            <p>The main React datetime application</p>
+            <a href="/" style="font-size: 1.2em;">→ View Main App</a>
+        </div>
+        
+        <h2>🔬 Test Scenarios</h2>
+        
+        <div class="test-grid">
+            <div class="test-card prerender">
+                <h3>🚀 prerenderReady: Fast</h3>
+                <p>Tests <code>window.prerenderReady</code> that triggers after 1 second</p>
+                <p>
+                    <a href="/test-prerender-ready-fast.html">View Normal</a> | 
+                    <a href="/test-prerender-ready-fast.html?_escaped_fragment_=">🤖 Test Prerender</a>
+                </p>
+                <div class="curl-command">
+                    curl -H "User-Agent: Googlebot" "https://your-site.netlify.app/test-prerender-ready-fast.html"
+                </div>
+                <p><small>Expected: ~1 second prerender time</small></p>
+            </div>
+            
+            <div class="test-card prerender">
+                <h3>⏰ prerenderReady: Timeout</h3>
+                <p>Tests <code>window.prerenderReady</code> that never triggers (timeout scenario)</p>
+                <p>
+                    <a href="/test-prerender-ready-timeout.html">View Normal</a> | 
+                    <a href="/test-prerender-ready-timeout.html?_escaped_fragment_=">🤖 Test Prerender</a>
+                </p>
+                <div class="curl-command">
+                    curl -H "User-Agent: Googlebot" "https://your-site.netlify.app/test-prerender-ready-timeout.html"
+                </div>
+                <p><small>Expected: ~9 second timeout</small></p>
+            </div>
+            
+            <div class="test-card tracking">
+                <h3>📡 Request Tracking</h3>
+                <p>Tests fallback behavior without <code>window.prerenderReady</code></p>
+                <p>
+                    <a href="/test-request-tracking.html">View Normal</a> | 
+                    <a href="/test-request-tracking.html?_escaped_fragment_=">🤖 Test Prerender</a>
+                </p>
+                <div class="curl-command">
+                    curl -H "User-Agent: Googlebot" "https://your-site.netlify.app/test-request-tracking.html"
+                </div>
+                <p><small>Expected: ~4 second wait for requests to settle</small></p>
+            </div>
+            
+            <div class="test-card status">
+                <h3>🚫 Status Code: 404</h3>
+                <p>Tests custom status codes via meta tags</p>
+                <p>
+                    <a href="/test-status-code-404.html">View Normal</a> | 
+                    <a href="/test-status-code-404.html?_escaped_fragment_=">🤖 Test Prerender</a>
+                </p>
+                <div class="curl-command">
+                    curl -I -H "User-Agent: Googlebot" "https://your-site.netlify.app/test-status-code-404.html"
+                </div>
+                <p><small>Expected: HTTP 404 response</small></p>
+            </div>
+            
+            <div class="test-card redirect">
+                <h3>🔄 Redirect: 301</h3>
+                <p>Tests redirects via meta tags</p>
+                <p>
+                    <a href="/test-redirect.html">View Normal</a> | 
+                    <a href="/test-redirect.html?_escaped_fragment_=">🤖 Test Prerender</a>
+                </p>
+                <div class="curl-command">
+                    curl -I -H "User-Agent: Googlebot" "https://your-site.netlify.app/test-redirect.html"
+                </div>
+                <p><small>Expected: HTTP 301 with Location header</small></p>
+            </div>
+        </div>
+        
+        <div style="margin-top: 40px; padding: 20px; background: rgba(0,0,0,0.2); border-radius: 10px;">
+            <h3>🛠️ Testing Tips</h3>
+            <ul>
+                <li><strong>Regular users:</strong> Click "View Normal" to see the browser experience</li>
+                <li><strong>Browser prerender testing:</strong> Click "🤖 Test Prerender" to trigger prerendering in your browser</li>
+                <li><strong>Crawler testing:</strong> Use curl with <code>-H "User-Agent: Googlebot"</code></li>
+                <li><strong>Force prerender:</strong> Add <code>?prerender=true</code> or <code>?_escaped_fragment_=</code> to any URL</li>
+                <li><strong>Debug headers:</strong> Use <code>curl -I</code> to see response headers</li>
+                <li><strong>Timing:</strong> Add <code>time</code> before curl commands to measure response time</li>
+            </ul>
+            <p><strong>🤖 What is _escaped_fragment_?</strong><br>
+            This is a legacy parameter that crawlers use to request prerendered content. Our edge function detects this parameter and routes to the prerender function, making it easy to test prerendering directly in your browser!</p>
+        </div>
+        
+        <div style="margin-top: 30px; text-align: center; opacity: 0.8;">
+            <p>🔗 <a href="https://github.com/your-username/prerender-example">View Source Code</a></p>
+            <p>Built with Netlify Edge Functions, Serverless Functions, and Puppeteer</p>
+        </div>
+    </div>
+    
+    <script>
+        console.log('🧪 Prerender Test Suite loaded');
+        console.log('🔗 Available test scenarios:');
+        console.log('  - prerenderReady fast trigger');
+        console.log('  - prerenderReady timeout');
+        console.log('  - Request tracking fallback');
+        console.log('  - Custom status codes');
+        console.log('  - Meta tag redirects');
+        
+        // Replace placeholder URLs with actual domain
+        if (window.location.hostname !== 'localhost') {
+            const commands = document.querySelectorAll('.curl-command');
+            commands.forEach(cmd => {
+                cmd.textContent = cmd.textContent.replace('your-site.netlify.app', window.location.hostname);
+            });
+        }
+    </script>
+</body>
+</html>

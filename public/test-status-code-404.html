@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="prerender-status-code" content="404">
+    <title>Test: 404 Status Code</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+            text-align: center;
+        }
+        .error-code {
+            font-size: 8rem;
+            font-weight: bold;
+            margin: 20px 0;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            color: #ffc107;
+        }
+        .meta-display {
+            background: rgba(0,0,0,0.3);
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            margin: 20px 0;
+            text-align: left;
+        }
+        .test-info {
+            background: rgba(23, 162, 184, 0.2);
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #17a2b8;
+            margin: 20px 0;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚫 Test: Status Code Metadata</h1>
+        
+        <div class="error-code">404</div>
+        
+        <h2>Page Not Found</h2>
+        <p>This page demonstrates how to use <code>&lt;meta name="prerender-status-code"&gt;</code> to control the HTTP status code returned by the prerender function.</p>
+        
+        <div class="meta-display">
+            <strong>Meta tag in &lt;head&gt;:</strong><br>
+            &lt;meta name="prerender-status-code" content="404"&gt;
+        </div>
+        
+        <div class="test-info">
+            <h4>ℹ️ How This Works</h4>
+            <p>When the prerender function processes this page, it:</p>
+            <ol>
+                <li>Renders the HTML content normally</li>
+                <li>Looks for <code>&lt;meta name="prerender-status-code" content="404"&gt;</code></li>
+                <li>Returns this HTML with a 404 status code instead of 200</li>
+                <li>Sets appropriate cache headers for error pages</li>
+            </ol>
+        </div>
+        
+        <h3>Content Details</h3>
+        <p>Even though this returns a 404 status code, it can still contain rich HTML content for SEO purposes.</p>
+        <p>Page rendered at: <span id="timestamp"></span></p>
+        
+        <div style="margin-top: 30px;">
+            <h4>🔗 Suggested Links</h4>
+            <ul style="text-align: left; display: inline-block;">
+                <li><a href="/" style="color: #ffc107;">← Back to Home</a></li>
+                <li><a href="/test-prerender-ready-fast.html" style="color: #ffc107;">Test prerenderReady Fast</a></li>
+                <li><a href="/test-redirect.html" style="color: #ffc107;">Test Redirects</a></li>
+            </ul>
+        </div>
+        
+        <div style="margin-top: 30px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 5px;">
+            <h4>🧪 Test with:</h4>
+            <code>curl -I -H "User-Agent: Googlebot" "https://your-site.netlify.app/test-status-code-404.html"</code>
+            <p><small>Should return: <code>HTTP/1.1 404 Not Found</code></small></p>
+        </div>
+        
+        <div style="margin-top: 20px; font-size: 0.9em; opacity: 0.8;">
+            <p>💡 <strong>Pro tip:</strong> You can use any valid HTTP status code (100-599) in the content attribute.</p>
+            <p>Common examples: 404 (Not Found), 410 (Gone), 500 (Server Error), 503 (Service Unavailable)</p>
+        </div>
+    </div>
+
+    <script>
+        // Set timestamp
+        document.getElementById('timestamp').textContent = new Date().toISOString();
+        
+        // This page will be ready immediately - no need for prerenderReady
+        console.log('🚫 404 test page loaded');
+        console.log('🏷️ Meta tag should cause prerender function to return 404 status');
+        
+        // Check if we're being prerendered
+        if (window.__PRERENDER__) {
+            console.log('🤖 Detected prerender environment');
+            console.log('📊 Expected status code: 404 (from meta tag)');
+        }
+        
+        // Add some dynamic content to make it interesting
+        setTimeout(() => {
+            const dynamicContent = document.createElement('div');
+            dynamicContent.innerHTML = '<p><em>Dynamic content loaded after 500ms - still a 404!</em></p>';
+            dynamicContent.style.cssText = 'margin-top: 20px; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px;';
+            document.querySelector('.container').appendChild(dynamicContent);
+        }, 500);
+    </script>
+</body>
+</html>

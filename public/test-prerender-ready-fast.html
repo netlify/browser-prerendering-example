@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: prerenderReady Fast</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .loading { background: rgba(255, 193, 7, 0.3); }
+        .ready { background: rgba(40, 167, 69, 0.3); }
+        #content {
+            margin-top: 20px;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+        #content.loaded {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Test: prerenderReady Fast Trigger</h1>
+        <p>This page demonstrates <code>window.prerenderReady</code> triggering quickly (after 1 second).</p>
+        
+        <div id="status" class="status loading">
+            ⏳ Loading... prerenderReady = false
+        </div>
+        
+        <div id="content">
+            <h2>Dynamic Content</h2>
+            <p>This content loaded at: <span id="timestamp"></span></p>
+            <p>Page ready at: <span id="ready-timestamp"></span></p>
+            
+            <h3>Testing Details</h3>
+            <ul>
+                <li><strong>Expected behavior:</strong> Prerender function should wait ~1 second and then proceed</li>
+                <li><strong>window.prerenderReady:</strong> Set to true after 1000ms</li>
+                <li><strong>Use case:</strong> Fast-loading SPA that signals when ready</li>
+            </ul>
+            
+            <div style="margin-top: 20px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 5px;">
+                <h4>🧪 Test with:</h4>
+                <code>curl -H "User-Agent: Googlebot" "https://your-site.netlify.app/test-prerender-ready-fast.html"</code>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initial state
+        window.prerenderReady = false;
+        
+        // Set timestamp immediately
+        document.getElementById('timestamp').textContent = new Date().toISOString();
+        
+        // Simulate fast loading - ready after 1 second
+        setTimeout(() => {
+            // Mark as ready for prerendering
+            window.prerenderReady = true;
+            
+            // Update UI
+            const status = document.getElementById('status');
+            status.className = 'status ready';
+            status.innerHTML = '✅ Ready! prerenderReady = true';
+            
+            document.getElementById('ready-timestamp').textContent = new Date().toISOString();
+            document.getElementById('content').classList.add('loaded');
+            
+            console.log('✅ prerenderReady set to true after 1000ms');
+        }, 1000);
+        
+        // Debug logging
+        console.log('🚀 Test page loaded - prerenderReady initially false');
+        console.log('⏳ Will set prerenderReady=true in 1000ms');
+        
+        // Check if we're being prerendered
+        if (window.__PRERENDER__) {
+            console.log('🤖 Detected prerender environment');
+        }
+    </script>
+</body>
+</html>

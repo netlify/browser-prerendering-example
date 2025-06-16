@@ -12,24 +12,30 @@ declare global {
 let browser: any = null;
 
 async function getBrowser() {
-  if (!browser) {    
-    let args = {
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-    }
+  if (!browser) {
+    // Check if running in Netlify/AWS Lambda environment
+    const isProduction = !process.env.NETLIFY_DEV;
     
-    if (!process.env.NETLIFY_DEV) {
-      console.log("Not local dev, using sparticuz/chromium")
+    if (isProduction) {
+      // Production - use sparticuz/chromium for Netlify/Lambda
+      console.log('Production environment detected, using @sparticuz/chromium');
       const executablePath = await chromium.executablePath();
-      const lambdaArgs = {
+      console.log('Chrome executable path:', executablePath);
+      
+      browser = await puppeteer.launch({
+        args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
         defaultViewport: chromium.defaultViewport,
-        executablePath: executablePath
-      }
-
-      args = {...args, ...lambdaArgs}
+        executablePath: executablePath,
+        headless: chromium.headless,
+      });
+    } else {
+      // Local development - use bundled Chromium
+      console.log('Local development environment detected, using bundled Chromium');
+      browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+      });
     }
-
-    browser = await puppeteer.launch(args);
   }
   
   return browser;

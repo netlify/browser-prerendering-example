@@ -18,9 +18,7 @@ async function getBrowser() {
     
     if (isProduction) {
       // Production - use sparticuz/chromium for Netlify/Lambda
-      console.log('Production environment detected, using @sparticuz/chromium');
       const executablePath = await chromium.executablePath();
-      console.log('Chrome executable path:', executablePath);
       
       browser = await puppeteer.launch({
         args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],

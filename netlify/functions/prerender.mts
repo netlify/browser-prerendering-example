@@ -63,7 +63,6 @@ async function getBrowser() {
   }
   
   if (!browser) {
-    
     if (isProduction) {
       // Production - use sparticuz/chromium for Netlify/Lambda
       const executablePath = await chromium.executablePath();

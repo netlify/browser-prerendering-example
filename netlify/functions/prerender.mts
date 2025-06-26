@@ -12,6 +12,35 @@ declare global {
 let browser: any = null;
 
 async function getBrowser() {
+  if (browser) {
+    try {
+      // Multi-layer validation to ensure browser is still connected and responsive
+      if (!browser.isConnected()) {
+        throw new Error('Browser disconnected');
+      }
+      
+      // Test actual CDP communication with timeout to detect stale connections
+      const pages = await Promise.race([
+        browser.pages(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Health check timeout')), 2000)
+        )
+      ]);
+      
+      console.log('Browser health check passed, reusing existing instance');
+      return browser;
+    } catch (error) {
+      console.log('Browser health check failed, recreating:', error.message);
+      try {
+        await browser.close();
+      } catch (closeError) {
+        // Ignore close errors for dead connections
+        console.log('Failed to close dead browser connection:', closeError.message);
+      }
+      browser = null;
+    }
+  }
+  
   if (!browser) {
     // Check if running in Netlify/AWS Lambda environment
     const isProduction = !process.env.NETLIFY_DEV;
@@ -34,6 +63,8 @@ async function getBrowser() {
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
       });
     }
+    
+    console.log('New browser instance created successfully');
   }
   
   return browser;

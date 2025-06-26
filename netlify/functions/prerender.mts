@@ -9,12 +9,31 @@ declare global {
   }
 }
 
+// Check if running in Netlify/AWS Lambda environment
+const isProduction = !process.env.NETLIFY_DEV;
+
+const localAllowRemoteHosts = !isProduction && process.env.LOCAL_ALLOW_REMOTE_HOSTS?.toLowerCase() === "true";
+const localShowBrowser = !isProduction && process.env.LOCAL_SHOW_BROWSER?.toLowerCase() === "true";
+
+// Block common cookie consent and tracking domains
+const customBlockedDomains = process.env.CUSTOM_BLOCKED_DOMAINS?.split(",") || [];
+const blockedDomains = [
+  'cookiebot.com',
+  'onetrust.com',
+  'quantcast.com',
+  'cookiepro.com',
+  'trustarc.com',
+  'cookielaw.org',
+  'google-analytics.com',
+  'googletagmanager.com',
+  'facebook.com/tr',
+  'hotjar.com',
+].concat(customBlockedDomains)
+
 let browser: any = null;
 
 async function getBrowser() {
   if (!browser) {
-    // Check if running in Netlify/AWS Lambda environment
-    const isProduction = !process.env.NETLIFY_DEV;
     
     if (isProduction) {
       // Production - use sparticuz/chromium for Netlify/Lambda
@@ -32,7 +51,7 @@ async function getBrowser() {
       // Local development - use bundled Chromium
       console.log('Local development environment detected, using bundled Chromium');
       browser = await puppeteer.launch({
-        headless: true,
+        headless: !localShowBrowser,
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
       });
     }
@@ -63,11 +82,11 @@ export default async (req: Request, context: Context) => {
       // Security checks to prevent abuse
       
       // 1. Only allow same-host requests to prevent open proxy abuse
-      if (parsedTargetUrl.host !== requestHost) {
+      if (parsedTargetUrl.host !== requestHost && !localAllowRemoteHosts) {
         console.error(`PRERENDER ERROR: Host mismatch - request from ${requestHost}, target ${parsedTargetUrl.host}`);
         return new Response('Invalid target URL: must be same host', { status: 403 });
       }
-      
+
       // 2. Only allow HTTP/HTTPS protocols
       if (!['http:', 'https:'].includes(parsedTargetUrl.protocol)) {
         console.error(`PRERENDER ERROR: Invalid protocol ${parsedTargetUrl.protocol} for ${targetUrlParam}`);
@@ -101,15 +120,15 @@ export default async (req: Request, context: Context) => {
       return new Response('Invalid URL format', { status: 400 });
     }
 
+    console.log(`Getting browser instance...`);
     const browserInstance = await getBrowser();
     const page = await browserInstance.newPage();
 
     // Set prerender user agent for consistent behavior
-    await page.setUserAgent('Mozilla/5.0 (compatible; Prerender)');
+    await page.setUserAgent('Mozilla/5.0 (compatible; Netlify Prerender Example)');
     await page.setRequestInterception(true);
     
     let blockedCount = 0;
-    let allowedCount = 0;
     let numRequestsInFlight = 0;
     let lastRequestReceivedAt = Date.now();
     const requests: { [requestId: string]: string } = {}; // Track requests by ID
@@ -117,52 +136,40 @@ export default async (req: Request, context: Context) => {
     page.on('request', (request) => {
       const url = request.url();
       const resourceType = request.resourceType();
-      
-      // Block common cookie consent and tracking domains
-      const blockedDomains = [
-        'cookiebot.com',
-        'onetrust.com',
-        'quantcast.com',
-        'cookiepro.com',
-        'trustarc.com',
-        'cookielaw.org',
-        'google-analytics.com',
-        'googletagmanager.com',
-        'facebook.com/tr',
-        'hotjar.com'
-      ];
-        
+         
       // Block tracking pixels and cookie consent scripts
       if (blockedDomains.some(domain => url.includes(domain)) ||
-          (resourceType === 'image' && (url.includes('track') || url.includes('pixel'))) ||
+          (resourceType === 'image' && (url.includes('track') || url.includes('pixel')  || url.includes('beacon'))) ||
           (resourceType === 'script' && (url.includes('cookie') || url.includes('consent')))) {
         blockedCount++;
         request.abort();
       } else {
-        allowedCount++;
-        // Increment on request start (Prerender.io pattern)
-        numRequestsInFlight++;
-        requests[request.url()] = url; // Track by URL since Puppeteer doesn't expose requestId easily
+        // In some cases, an event for the same request ID is received twice, don't double-count it.
+        if (!requests[request.id]) {
+          // Increment on request start (Prerender.io pattern)
+          numRequestsInFlight++;
+          requests[request.id] = url;
+        }
         request.continue();
       }
     });
 
     // Track request completion for network activity monitoring (Prerender.io pattern)
     page.on('requestfinished', (request) => {
-      const url = request.url();
-      if (requests[url]) {
+      const id = request.id;
+      if (requests[id]) {
         numRequestsInFlight = Math.max(0, numRequestsInFlight - 1);
         lastRequestReceivedAt = Date.now();
-        delete requests[url];
+        delete requests[id];
       }
     });
 
     page.on('requestfailed', (request) => {
-      const url = request.url();
-      if (requests[url]) {
+      const id = request.id;
+      if (requests[id]) {
         numRequestsInFlight = Math.max(0, numRequestsInFlight - 1);
         lastRequestReceivedAt = Date.now();
-        delete requests[url];
+        delete requests[id];
       }
     });
 
@@ -184,8 +191,8 @@ export default async (req: Request, context: Context) => {
     });
 
     // Navigate to the URL with optimized settings
+    console.log(`Navigating to ${targetUrl}...`);
     const navigationStart = Date.now();
-    
     try {
       await page.goto(targetUrl, { 
         waitUntil: 'domcontentloaded',
@@ -195,12 +202,14 @@ export default async (req: Request, context: Context) => {
       console.error(`PRERENDER ERROR: Navigation failed for ${targetUrl}: ${navigationError.message}`);
       throw navigationError;
     }
+    const navigationTime = Date.now() - navigationStart;
 
     // Enhanced prerenderReady flow with simplified logic
     const waitAfterLastRequest = 500; // 500ms wait after last request completes
     const pageDoneCheckInterval = 100; // Check every 100ms
-    const maxWaitTime = 9000; // Maximum wait time (9 seconds)
+    const maxWaitTime = 10000; // Maximum wait time (10 seconds)
     
+    console.log("Waiting for window.prerenderReady or requests to settle...");
     const waitStart = Date.now();
     
     // Core logic: checkIfDone evaluates prerenderReady and request tracking
@@ -231,15 +240,15 @@ export default async (req: Request, context: Context) => {
       // If prerenderReady is not used (null), fall back to request tracking
       const timeSinceLastRequest = now - lastRequestReceivedAt;
       const requestsSettled = numRequestsInFlight <= 0 && timeSinceLastRequest >= waitAfterLastRequest;
-      
+
       return requestsSettled;
     };
-    
+
     // Polling system: check every pageDoneCheckInterval until done
     while (!(await checkIfDone())) {
       await new Promise(resolve => setTimeout(resolve, pageDoneCheckInterval));
     }
-    
+
     const totalWaitTime = Date.now() - waitStart;
 
     // Check for prerender status code meta tag
@@ -285,7 +294,6 @@ export default async (req: Request, context: Context) => {
     await page.close();
     
     const renderTime = Date.now() - startTime;
-    const navigationTime = Date.now() - navigationStart;
 
     // Handle different status codes and enhanced caching
     let statusCode = 200;
@@ -317,7 +325,7 @@ export default async (req: Request, context: Context) => {
       return typeof window.prerenderReady === 'boolean' ? window.prerenderReady : null;
     }).catch(() => null);
     
-    console.log(`PRERENDER SUCCESS: ${targetUrl} | ${renderTime}ms total (${navigationTime}ms nav, ${totalWaitTime}ms wait) | ${statusCode} status | ${htmlSize}B HTML | prerenderReady=${finalPrerenderReady} | requests=${allowedCount}/${allowedCount + blockedCount} (${numRequestsInFlight} pending) | domCleanup=${removedElements} | IP=${clientIP}`);
+    console.log(`PRERENDER SUCCESS: ${targetUrl} | ${renderTime}ms total (${navigationTime}ms nav, ${totalWaitTime}ms wait) | ${statusCode} status | ${htmlSize}B HTML | prerenderReady=${finalPrerenderReady} | ${blockedCount} requests blocked | domCleanup=${removedElements} | IP=${clientIP}`);
     
     return new Response(html, {
       status: statusCode,

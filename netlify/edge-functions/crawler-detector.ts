@@ -149,7 +149,9 @@ export default async (req: Request, context: Context) => {
   // Skip for API routes and specific patterns
   if (url.pathname.startsWith('/api/') || 
       url.pathname.startsWith('/_next/') ||
-      url.pathname.startsWith('/static/')) {
+      url.pathname.startsWith('/static/') ||
+      url.pathname === '/.netlify/images'
+    ) {
     return;
   }
   

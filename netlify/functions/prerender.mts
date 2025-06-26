@@ -14,6 +14,7 @@ const isProduction = !process.env.NETLIFY_DEV;
 
 const localAllowRemoteHosts = !isProduction && process.env.LOCAL_ALLOW_REMOTE_HOSTS?.toLowerCase() === "true";
 const localShowBrowser = !isProduction && process.env.LOCAL_SHOW_BROWSER?.toLowerCase() === "true";
+const userAgent = process.env.PRERENDER_USER_AGENT || 'Mozilla/5.0 (compatible; Netlify Prerender Example)';
 
 // Block common cookie consent and tracking domains
 const customBlockedDomains = process.env.CUSTOM_BLOCKED_DOMAINS?.split(",") || [];
@@ -114,7 +115,6 @@ export default async (req: Request, context: Context) => {
         console.error(`PRERENDER ERROR: Host mismatch - request from ${requestHost}, target ${parsedTargetUrl.host}`);
         return new Response('Invalid target URL: must be same host', { status: 403 });
       }
-
       // 2. Only allow HTTP/HTTPS protocols
       if (!['http:', 'https:'].includes(parsedTargetUrl.protocol)) {
         console.error(`PRERENDER ERROR: Invalid protocol ${parsedTargetUrl.protocol} for ${targetUrlParam}`);
@@ -149,11 +149,13 @@ export default async (req: Request, context: Context) => {
     }
 
     console.log(`Getting browser instance...`);
+    const getBrowserStart = Date.now();
     const browserInstance = await getBrowser();
     const page = await browserInstance.newPage();
+    const getBrowserTime = Date.now() - getBrowserStart;
 
     // Set prerender user agent for consistent behavior
-    await page.setUserAgent('Mozilla/5.0 (compatible; Netlify Prerender Example)');
+    await page.setUserAgent(userAgent);
     await page.setRequestInterception(true);
     
     let blockedCount = 0;
@@ -268,15 +270,12 @@ export default async (req: Request, context: Context) => {
       // If prerenderReady is not used (null), fall back to request tracking
       const timeSinceLastRequest = now - lastRequestReceivedAt;
       const requestsSettled = numRequestsInFlight <= 0 && timeSinceLastRequest >= waitAfterLastRequest;
-
       return requestsSettled;
     };
-
     // Polling system: check every pageDoneCheckInterval until done
     while (!(await checkIfDone())) {
       await new Promise(resolve => setTimeout(resolve, pageDoneCheckInterval));
     }
-
     const totalWaitTime = Date.now() - waitStart;
 
     // Check for prerender status code meta tag
@@ -353,7 +352,7 @@ export default async (req: Request, context: Context) => {
       return typeof window.prerenderReady === 'boolean' ? window.prerenderReady : null;
     }).catch(() => null);
     
-    console.log(`PRERENDER SUCCESS: ${targetUrl} | ${renderTime}ms total (${navigationTime}ms nav, ${totalWaitTime}ms wait) | ${statusCode} status | ${htmlSize}B HTML | prerenderReady=${finalPrerenderReady} | ${blockedCount} requests blocked | domCleanup=${removedElements} | IP=${clientIP}`);
+    console.log(`PRERENDER SUCCESS: ${targetUrl} | ${renderTime}ms total (${getBrowserTime}ms get browser, ${navigationTime}ms nav, ${totalWaitTime}ms wait) | ${statusCode} status | ${htmlSize}B HTML | prerenderReady=${finalPrerenderReady} | ${blockedCount} requests blocked | domCleanup=${removedElements} | IP=${clientIP}`);
     
     return new Response(html, {
       status: statusCode,

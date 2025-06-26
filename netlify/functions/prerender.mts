@@ -31,6 +31,12 @@ const blockedDomains = [
   'hotjar.com',
 ].concat(customBlockedDomains)
 
+const waitAfterLastRequest = 500; // 500ms wait after last request completes
+const pageDoneCheckInterval = 100; // Check every 100ms
+const maxWaitTime = 10000; // Maximum wait time (10 seconds)
+const inFlightReportAfterTime = 2000; // After how long of a wait to start logging remaining in-flight requests 
+const inFlightReportInterval = 1000; // Report in-flight requests every second
+
 let browser: any = null;
 
 async function getBrowser() {
@@ -234,13 +240,9 @@ export default async (req: Request, context: Context) => {
     }
     const navigationTime = Date.now() - navigationStart;
 
-    // Enhanced prerenderReady flow with simplified logic
-    const waitAfterLastRequest = 500; // 500ms wait after last request completes
-    const pageDoneCheckInterval = 100; // Check every 100ms
-    const maxWaitTime = 10000; // Maximum wait time (10 seconds)
-    
     console.log("Waiting for window.prerenderReady or requests to settle...");
     const waitStart = Date.now();
+    let lastInFlightReportTime = waitStart;
     
     // Core logic: checkIfDone evaluates prerenderReady and request tracking
     const checkIfDone = async (): Promise<boolean> => {
@@ -270,6 +272,14 @@ export default async (req: Request, context: Context) => {
       // If prerenderReady is not used (null), fall back to request tracking
       const timeSinceLastRequest = now - lastRequestReceivedAt;
       const requestsSettled = numRequestsInFlight <= 0 && timeSinceLastRequest >= waitAfterLastRequest;
+
+      if (numRequestsInFlight > 0 && totalWaitTime >= inFlightReportAfterTime) {
+        if (now - lastInFlightReportTime > inFlightReportInterval) {
+          const inflightUrls = Object.values(requests).map(url => url.substring(0, 200));
+          console.log(`In-flight requests after ${Date.now() - waitStart}ms of wait: `, inflightUrls);
+          lastInFlightReportTime = now;
+        }
+      }
       return requestsSettled;
     };
     // Polling system: check every pageDoneCheckInterval until done
@@ -283,35 +293,6 @@ export default async (req: Request, context: Context) => {
       'meta[name="prerender-status-code"]',
       (el) => el?.getAttribute('content')
     ).catch(() => null);
-
-    // Check for prerender redirect header meta tag
-    const redirectMeta = await page.$eval(
-      'meta[name="prerender-header"]',
-      (el) => el?.getAttribute('content')
-    ).catch(() => null);
-
-    // Clean up any open dialogs or alerts that might interfere (skip in fast mode)
-    let removedElements = 0;
-    removedElements = await page.evaluate(() => {
-      // Remove cookie consent banners and modals
-      const selectors = [
-        '[id*="cookie"]', '[class*="cookie"]', '[id*="consent"]', '[class*="consent"]',
-        '[id*="gdpr"]', '[class*="gdpr"]', '.modal', '.popup', '.overlay',
-        '[data-testid*="cookie"]', '[data-cy*="cookie"]'
-      ];
-      
-      let removedCount = 0;
-      selectors.forEach(selector => {
-        const elements = document.querySelectorAll(selector);
-        elements.forEach(el => {
-          if (el instanceof HTMLElement && el.offsetHeight > 0) {
-            el.remove();
-            removedCount++;
-          }
-        });
-      });
-      return removedCount;
-    });
 
     // Get the rendered HTML
     const html = await page.content();
@@ -352,7 +333,7 @@ export default async (req: Request, context: Context) => {
       return typeof window.prerenderReady === 'boolean' ? window.prerenderReady : null;
     }).catch(() => null);
     
-    console.log(`PRERENDER SUCCESS: ${targetUrl} | ${renderTime}ms total (${getBrowserTime}ms get browser, ${navigationTime}ms nav, ${totalWaitTime}ms wait) | ${statusCode} status | ${htmlSize}B HTML | prerenderReady=${finalPrerenderReady} | ${blockedCount} requests blocked | domCleanup=${removedElements} | IP=${clientIP}`);
+    console.log(`PRERENDER SUCCESS: ${targetUrl} | ${renderTime}ms total (${getBrowserTime}ms get browser, ${navigationTime}ms nav, ${totalWaitTime}ms wait) | ${statusCode} status | ${htmlSize}B HTML | prerenderReady=${finalPrerenderReady} | ${blockedCount} requests blocked | IP=${clientIP}`);
     
     return new Response(html, {
       status: statusCode,

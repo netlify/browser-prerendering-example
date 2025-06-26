@@ -1,6 +1,6 @@
-# Netlify Prerendering Demo
+# Netlify Servereless Browser Prerendering
 
-A demonstration of using **Netlify Primitives** (Edge Functions, Serverless Functions, and Durable Caching) to implement intelligent prerendering for web crawlers and bots.
+An example of using **Netlify Primitives** (Edge Functions, Serverless Functions, and Durable Caching) to implement serverless browser prerendering for web crawlers and bots.
 
 ## Overview
 
@@ -93,12 +93,6 @@ const isCrawlerRequest = (req: Request): boolean => {
 - **Content-based caching** strategies
 
 ### 3. Durable Caching Strategy
-
-**Cache Headers:**
-- **Static content:** 7 days CDN, 1 day browser
-- **Dynamic content:** 1 day CDN, 1 hour browser  
-- **User-specific content:** 5 minutes CDN, 1 minute browser
-- **Error pages:** 1 hour CDN, 5 minutes browser
 
 **Cache Invalidation:**
 - Automatic via `stale-while-revalidate`
@@ -341,22 +335,14 @@ See `/TESTING.md` for comprehensive testing instructions, including:
 - Verify network requests are completing
 - Monitor function logs for timing details
 
-**Open proxy abuse:**
-- Host validation should block external URLs
+**Abuse prevention:**
+- Host validation will block external URLs
 - Monitor IP addresses in logs
 - Add rate limiting if needed
 
-### Debug Mode
-
-Enable detailed logging by checking function logs in Netlify dashboard or using:
-
-```bash
-netlify functions:invoke prerender --payload='{"url": "test"}'
-```
-
 ## Contributing
 
-This is a demonstration project showcasing Netlify's prerendering capabilities. Feel free to:
+This is an example project showcasing Netlify's prerendering capabilities. Feel free to:
 
 1. Fork and adapt for your use case
 2. Submit issues for bugs or improvements

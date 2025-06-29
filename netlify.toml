@@ -3,6 +3,11 @@
   publish = "dist"
 
 [[redirects]]
-  from = "/"
+  from = "/prerender"
+  to = "/api/prerender"
+  status = 200
+
+[[redirects]]
+  from = "/*"
   to = "/index.html"
   status = 200

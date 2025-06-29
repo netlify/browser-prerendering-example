@@ -330,6 +330,17 @@ export default async (req: Request, context: Context) => {
     // Single success log line with all important details
     console.log(`PRERENDER SUCCESS: ${targetUrl} | ${renderTime}ms total (${getBrowserTime}ms get browser, ${navigationTime}ms nav, ${totalWaitTime}ms wait) | ${statusCode} status | ${htmlSize}B HTML | ${blockedCount} requests blocked | IP=${clientIP}`);
     
+    // In resource-constrained environments, creating a new page can hang for a while until the 
+    // browser is available again. Therefore, spending that time now (if needed) but without blocking 
+    // the response.
+    const cleanup = async () => {
+      const cleanupStart = Date.now();
+      const page = await browserInstance.newPage();
+      await page.close();
+      console.log(`Async resource cleanup done in ${Date.now() - cleanupStart}ms`);
+    }
+    context.waitUntil(cleanup());
+
     return new Response(html, {
       status: statusCode,
       headers

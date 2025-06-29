@@ -1,5 +1,5 @@
 import type { Context, Config } from "@netlify/functions";
-import puppeteer from "puppeteer";
+import puppeteer, { Browser, HTTPRequest } from "puppeteer";
 import chromium from "@sparticuz/chromium";
 
 // Extend Window interface for prerenderReady
@@ -9,23 +9,63 @@ declare global {
   }
 }
 
-let browser: any = null;
+type RequestWithId = HTTPRequest & {
+  id: string;
+}
+
+// Check if running in Netlify/AWS Lambda environment
+const isProduction = !process.env.NETLIFY_DEV;
+
+const allowRemoteHostsRawSetting: string|undefined = process.env.PRERENDER_ALLOW_REMOTE_HOSTS?.toLowerCase();
+const allowRemoteHosts = allowRemoteHostsRawSetting && 
+  (allowRemoteHostsRawSetting === "always" || 
+   (allowRemoteHostsRawSetting === "local" && !isProduction));
+
+const localShowBrowser = !isProduction && process.env.PRERENDER_LOCAL_SHOW_BROWSER?.toLowerCase() === "true";
+const userAgent = process.env.PRERENDER_USER_AGENT || 'Mozilla/5.0 (compatible; Netlify Prerender Function)';
+const skipConnectionTest = process.env.PRERENDER_SKIP_CONNECTION_TEST?.toLowerCase() === "true";
+const disableCaching = process.env.PRERENDER_DISABLE_CACHING?.toLowerCase() === "true";
+
+// Block common cookie consent and tracking domains
+const customBlockedDomains = process.env.PRERENDER_CUSTOM_BLOCKED_DOMAINS?.split(",") || [];
+const blockedDomains = [
+  'cookiebot.com',
+  'onetrust.com',
+  'quantcast.com',
+  'cookiepro.com',
+  'trustarc.com',
+  'cookielaw.org',
+  'google-analytics.com',
+  'googletagmanager.com',
+  'facebook.com/tr',
+  'hotjar.com',
+].concat(customBlockedDomains)
+
+const waitAfterLastRequest = 500; // 500ms wait after last request completes
+const pageDoneCheckInterval = 100; // Check every 100ms
+const maxWaitTime = 10000; // Maximum wait time (10 seconds)
+const inFlightReportAfterTime = 2000; // After how long of a wait to start logging remaining in-flight requests 
+const inFlightReportInterval = 1000; // Report in-flight requests every second
+
+let browser: Browser|null = null;
 
 async function getBrowser() {
   if (browser) {
     try {
       // Multi-layer validation to ensure browser is still connected and responsive
-      if (!browser.isConnected()) {
+      if (!browser.connected) {
         throw new Error('Browser disconnected');
       }
-      
-      // Test actual CDP communication with timeout to detect stale connections
-      const pages = await Promise.race([
-        browser.pages(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Health check timeout')), 2000)
-        )
-      ]);
+
+      if (!skipConnectionTest) {
+        // Test actual CDP communication with timeout to detect stale connections
+        const pages = await Promise.race([
+          browser.pages(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Health check timeout')), 2000)
+          )
+        ]);
+      }
       
       console.log('Browser health check passed, reusing existing instance');
       return browser;
@@ -42,9 +82,6 @@ async function getBrowser() {
   }
   
   if (!browser) {
-    // Check if running in Netlify/AWS Lambda environment
-    const isProduction = !process.env.NETLIFY_DEV;
-    
     if (isProduction) {
       // Production - use sparticuz/chromium for Netlify/Lambda
       const executablePath = await chromium.executablePath();
@@ -59,7 +96,7 @@ async function getBrowser() {
       // Local development - use bundled Chromium
       console.log('Local development environment detected, using bundled Chromium');
       browser = await puppeteer.launch({
-        headless: true,
+        headless: !localShowBrowser,
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
       });
     }
@@ -92,11 +129,10 @@ export default async (req: Request, context: Context) => {
       // Security checks to prevent abuse
       
       // 1. Only allow same-host requests to prevent open proxy abuse
-      if (parsedTargetUrl.host !== requestHost) {
+      if (!allowRemoteHosts && parsedTargetUrl.host !== requestHost) {
         console.error(`PRERENDER ERROR: Host mismatch - request from ${requestHost}, target ${parsedTargetUrl.host}`);
         return new Response('Invalid target URL: must be same host', { status: 403 });
       }
-      
       // 2. Only allow HTTP/HTTPS protocols
       if (!['http:', 'https:'].includes(parsedTargetUrl.protocol)) {
         console.error(`PRERENDER ERROR: Invalid protocol ${parsedTargetUrl.protocol} for ${targetUrlParam}`);
@@ -130,15 +166,17 @@ export default async (req: Request, context: Context) => {
       return new Response('Invalid URL format', { status: 400 });
     }
 
+    console.log(`Getting browser instance...`);
+    const getBrowserStart = Date.now();
     const browserInstance = await getBrowser();
     const page = await browserInstance.newPage();
+    const getBrowserTime = Date.now() - getBrowserStart;
 
     // Set prerender user agent for consistent behavior
-    await page.setUserAgent('Mozilla/5.0 (compatible; Prerender)');
+    await page.setUserAgent(userAgent);
     await page.setRequestInterception(true);
     
     let blockedCount = 0;
-    let allowedCount = 0;
     let numRequestsInFlight = 0;
     let lastRequestReceivedAt = Date.now();
     const requests: { [requestId: string]: string } = {}; // Track requests by ID
@@ -146,52 +184,41 @@ export default async (req: Request, context: Context) => {
     page.on('request', (request) => {
       const url = request.url();
       const resourceType = request.resourceType();
-      
-      // Block common cookie consent and tracking domains
-      const blockedDomains = [
-        'cookiebot.com',
-        'onetrust.com',
-        'quantcast.com',
-        'cookiepro.com',
-        'trustarc.com',
-        'cookielaw.org',
-        'google-analytics.com',
-        'googletagmanager.com',
-        'facebook.com/tr',
-        'hotjar.com'
-      ];
-        
+         
       // Block tracking pixels and cookie consent scripts
       if (blockedDomains.some(domain => url.includes(domain)) ||
-          (resourceType === 'image' && (url.includes('track') || url.includes('pixel'))) ||
+          (resourceType === 'image' && (url.includes('track') || url.includes('pixel')  || url.includes('beacon'))) ||
           (resourceType === 'script' && (url.includes('cookie') || url.includes('consent')))) {
         blockedCount++;
         request.abort();
       } else {
-        allowedCount++;
-        // Increment on request start (Prerender.io pattern)
-        numRequestsInFlight++;
-        requests[request.url()] = url; // Track by URL since Puppeteer doesn't expose requestId easily
+        const reqId = (request as RequestWithId).id;
+        // In some cases, an event for the same request ID is received twice, don't double-count it.
+        if (!requests[reqId]) {
+          // Increment on request start (Prerender.io pattern)
+          numRequestsInFlight++;
+          requests[reqId] = url;
+        }
         request.continue();
       }
     });
 
     // Track request completion for network activity monitoring (Prerender.io pattern)
     page.on('requestfinished', (request) => {
-      const url = request.url();
-      if (requests[url]) {
+      const id = (request as RequestWithId).id;
+      if (requests[id]) {
         numRequestsInFlight = Math.max(0, numRequestsInFlight - 1);
         lastRequestReceivedAt = Date.now();
-        delete requests[url];
+        delete requests[id];
       }
     });
 
     page.on('requestfailed', (request) => {
-      const url = request.url();
-      if (requests[url]) {
+      const id = (request as RequestWithId).id;
+      if (requests[id]) {
         numRequestsInFlight = Math.max(0, numRequestsInFlight - 1);
         lastRequestReceivedAt = Date.now();
-        delete requests[url];
+        delete requests[id];
       }
     });
 
@@ -213,8 +240,8 @@ export default async (req: Request, context: Context) => {
     });
 
     // Navigate to the URL with optimized settings
+    console.log(`Navigating to ${targetUrl}...`);
     const navigationStart = Date.now();
-    
     try {
       await page.goto(targetUrl, { 
         waitUntil: 'domcontentloaded',
@@ -224,13 +251,11 @@ export default async (req: Request, context: Context) => {
       console.error(`PRERENDER ERROR: Navigation failed for ${targetUrl}: ${navigationError.message}`);
       throw navigationError;
     }
+    const navigationTime = Date.now() - navigationStart;
 
-    // Enhanced prerenderReady flow with simplified logic
-    const waitAfterLastRequest = 500; // 500ms wait after last request completes
-    const pageDoneCheckInterval = 100; // Check every 100ms
-    const maxWaitTime = 9000; // Maximum wait time (9 seconds)
-    
+    console.log("Waiting for window.prerenderReady or requests to settle...");
     const waitStart = Date.now();
+    let lastInFlightReportTime = waitStart;
     
     // Core logic: checkIfDone evaluates prerenderReady and request tracking
     const checkIfDone = async (): Promise<boolean> => {
@@ -260,51 +285,21 @@ export default async (req: Request, context: Context) => {
       // If prerenderReady is not used (null), fall back to request tracking
       const timeSinceLastRequest = now - lastRequestReceivedAt;
       const requestsSettled = numRequestsInFlight <= 0 && timeSinceLastRequest >= waitAfterLastRequest;
-      
+
+      if (numRequestsInFlight > 0 && totalWaitTime >= inFlightReportAfterTime) {
+        if (now - lastInFlightReportTime > inFlightReportInterval) {
+          const inflightUrls = Object.values(requests).map(url => url.substring(0, 200));
+          console.log(`In-flight requests after ${Date.now() - waitStart}ms of wait: `, inflightUrls);
+          lastInFlightReportTime = now;
+        }
+      }
       return requestsSettled;
     };
-    
     // Polling system: check every pageDoneCheckInterval until done
     while (!(await checkIfDone())) {
       await new Promise(resolve => setTimeout(resolve, pageDoneCheckInterval));
     }
-    
     const totalWaitTime = Date.now() - waitStart;
-
-    // Check for prerender status code meta tag
-    const statusCodeMeta = await page.$eval(
-      'meta[name="prerender-status-code"]',
-      (el) => el?.getAttribute('content')
-    ).catch(() => null);
-
-    // Check for prerender redirect header meta tag
-    const redirectMeta = await page.$eval(
-      'meta[name="prerender-header"]',
-      (el) => el?.getAttribute('content')
-    ).catch(() => null);
-
-    // Clean up any open dialogs or alerts that might interfere (skip in fast mode)
-    let removedElements = 0;
-    removedElements = await page.evaluate(() => {
-      // Remove cookie consent banners and modals
-      const selectors = [
-        '[id*="cookie"]', '[class*="cookie"]', '[id*="consent"]', '[class*="consent"]',
-        '[id*="gdpr"]', '[class*="gdpr"]', '.modal', '.popup', '.overlay',
-        '[data-testid*="cookie"]', '[data-cy*="cookie"]'
-      ];
-      
-      let removedCount = 0;
-      selectors.forEach(selector => {
-        const elements = document.querySelectorAll(selector);
-        elements.forEach(el => {
-          if (el instanceof HTMLElement && el.offsetHeight > 0) {
-            el.remove();
-            removedCount++;
-          }
-        });
-      });
-      return removedCount;
-    });
 
     // Get the rendered HTML
     const html = await page.content();
@@ -314,7 +309,6 @@ export default async (req: Request, context: Context) => {
     await page.close();
     
     const renderTime = Date.now() - startTime;
-    const navigationTime = Date.now() - navigationStart;
 
     // Handle different status codes and enhanced caching
     let statusCode = 200;
@@ -325,28 +319,16 @@ export default async (req: Request, context: Context) => {
       'X-Prerender-Timestamp': new Date().toISOString(),
     };
 
-    headers['Netlify-CDN-Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=604800, durable';
-    headers['Cache-Control'] = 'public, max-age=0, must-revalidate';
-    headers['Cache-Tags'] = 'nf-prerender';
-
-    if (statusCodeMeta) {
-      const code = parseInt(statusCodeMeta, 10);
-      if (code >= 100 && code < 600) {
-        statusCode = code;
-
-        if (code >= 500) {
-          headers['Netlify-CDN-Cache-Control'] = 'no-cache';
-          headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
-        }
-      }
+    if (disableCaching) {
+      headers['Cache-Control'] = 'no-store';
+    } else {
+      headers['Netlify-CDN-Cache-Control'] = 'public, max-age=3600, stale-while-revalidate=604800, durable';
+      headers['Cache-Control'] = 'public, max-age=0, must-revalidate';
+      headers['Cache-Tags'] = 'nf-prerender';
     }
 
     // Single success log line with all important details
-    const finalPrerenderReady = await page.evaluate(() => {
-      return typeof window.prerenderReady === 'boolean' ? window.prerenderReady : null;
-    }).catch(() => null);
-    
-    console.log(`PRERENDER SUCCESS: ${targetUrl} | ${renderTime}ms total (${navigationTime}ms nav, ${totalWaitTime}ms wait) | ${statusCode} status | ${htmlSize}B HTML | prerenderReady=${finalPrerenderReady} | requests=${allowedCount}/${allowedCount + blockedCount} (${numRequestsInFlight} pending) | domCleanup=${removedElements} | IP=${clientIP}`);
+    console.log(`PRERENDER SUCCESS: ${targetUrl} | ${renderTime}ms total (${getBrowserTime}ms get browser, ${navigationTime}ms nav, ${totalWaitTime}ms wait) | ${statusCode} status | ${htmlSize}B HTML | ${blockedCount} requests blocked | IP=${clientIP}`);
     
     return new Response(html, {
       status: statusCode,

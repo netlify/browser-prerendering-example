@@ -137,20 +137,22 @@ export default async (req: Request, context: Context) => {
   
   // Enhanced HTML request detection (matching Go logic)
   if (!isHTMLRequest(url.pathname)) {
-    return context.next();
+    return;
   }
   
   // Enhanced Accept header validation
   const acceptHeader = req.headers.get('accept') || '';
   if (!acceptsHTML(acceptHeader)) {
-    return context.next();
+    return;
   }
   
   // Skip for API routes and specific patterns
   if (url.pathname.startsWith('/api/') || 
       url.pathname.startsWith('/_next/') ||
-      url.pathname.startsWith('/static/')) {
-    return context.next();
+      url.pathname.startsWith('/static/') ||
+      url.pathname === '/.netlify/images'
+    ) {
+    return;
   }
   
   // Check if this is a crawler request (comprehensive logic)
@@ -180,12 +182,12 @@ export default async (req: Request, context: Context) => {
     } catch (error) {
       console.error('Error calling prerender service:', error);
       // Fall back to normal response if prerender fails
-      return context.next();
+      return;
     }
   }
   
   // For regular users, serve the normal page
-  return context.next();
+  return;
 };
 
 export const config: Config = {

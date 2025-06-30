@@ -1,6 +1,7 @@
 import type { Context, Config } from "@netlify/functions";
 import puppeteer, { Browser, HTTPRequest } from "puppeteer";
 import chromium from "@sparticuz/chromium";
+import psl from "psl";
 
 // Extend Window interface for prerenderReady
 declare global {
@@ -23,36 +24,14 @@ const allowRemoteHosts = allowRemoteHostsRawSetting &&
 
 const localShowBrowser = !isProduction && process.env.PRERENDER_LOCAL_SHOW_BROWSER?.toLowerCase() === "true";
 const userAgent = process.env.PRERENDER_USER_AGENT || 'Mozilla/5.0 (compatible; Netlify Prerender Function)';
-const skipConnectionTest = process.env.PRERENDER_SKIP_CONNECTION_TEST?.toLowerCase() === "true";
 const disableCaching = process.env.PRERENDER_DISABLE_CACHING?.toLowerCase() === "true";
-const blockVisualResources = !(process.env.PRERENDER_BLOCK_VISUAL_RESOURCES?.toLowerCase() === "false");
-
-// Cut loading time by blocking common cookie consent and tracking domains
-const customBlockList = process.env.PRERENDER_CUSTOM_BLOCK_LIST?.split(",").filter(Boolean) || [];
-const blockList = [
-  'cookiebot.com',
-  'onetrust.com',
-  'quantcast.com',
-  'cookiepro.com',
-  'trustarc.com',
-  'cookielaw.org',
-  'google-analytics.com',
-  'googletagmanager.com',
-  'facebook.com/tr',
-  'hotjar.com',
-  'hubspot.com',
-  'youtube.com',
-  'splunkcloud.com',
-  'doubleclick.net',
-  'sentry.io',
-  'gstatic.com',
-  'facebook.net',
-  'intercom.io',
-].concat(customBlockList)
+const skipVisualResources = !(process.env.PRERENDER_SKIP_VISUAL_RESOURCES?.toLowerCase() === "false");
+const skipThirdParty = !(process.env.PRERENDER_SKIP_THIRD_PARTY?.toLowerCase() === "false");
+const skipCustomList = process.env.PRERENDER_SKIP_CUSTOM_LIST?.split(",").filter(Boolean) || [];
+const shouldLogSkipped = process.env.PRERENDER_SKIP_LOGGING?.toLowerCase() === "true";
 
 const visualResourceTypes = ['image', 'media', 'font', 'stylesheet'];
-
-const waitAfterLastRequest = 500; // 500ms wait after last request completes
+const waitAfterLastRequest = 300; // 300ms wait after last request completes
 const pageDoneCheckInterval = 100; // Check every 100ms
 const maxWaitTime = 10000; // Maximum wait time (10 seconds)
 const inFlightReportAfterTime = 1000; // After how long of a wait to start logging remaining in-flight requests 
@@ -68,15 +47,13 @@ async function getBrowser() {
         throw new Error('Browser disconnected');
       }
 
-      if (!skipConnectionTest) {
-        // Test actual CDP communication with timeout to detect stale connections
-        const pages = await Promise.race([
-          browser.pages(),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Health check timeout')), 2000)
-          )
-        ]);
-      }
+      // Test actual CDP communication with timeout to detect stale connections
+      const pages = await Promise.race([
+        browser.pages(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Health check timeout')), 2000)
+        )
+      ]);
       
       console.log('Browser health check passed, reusing existing instance');
       return browser;
@@ -133,9 +110,10 @@ export default async (req: Request, context: Context) => {
 
     // Security: Prevent open proxy usage by ensuring same host
     const requestHost = new URL(req.url).host;
-    
+
+    let parsedTargetUrl: URL|undefined;
     try {
-      const parsedTargetUrl = new URL(targetUrlParam);
+      parsedTargetUrl = new URL(targetUrlParam);
       
       // Security checks to prevent abuse
       
@@ -187,21 +165,34 @@ export default async (req: Request, context: Context) => {
     await page.setUserAgent(userAgent);
     await page.setRequestInterception(true);
     
-    let blockedCount = 0;
+    let skippedCount = 0;
     let numRequestsInFlight = 0;
     let lastRequestReceivedAt = Date.now();
     const requests: { [requestId: string]: string } = {}; // Track requests by ID
-    
+    const pageDomain = psl.parse(parsedTargetUrl.hostname).domain;
+
     page.on('request', (request) => {
       const url = request.url();
       const resourceType = request.resourceType();
-         
-      // Block tracking pixels and cookie consent scripts
-      if (blockList.some(domain => url.includes(domain)) ||
-          (blockVisualResources && visualResourceTypes.includes(resourceType)) ||
-          (resourceType === 'image' && (url.includes('track') || url.includes('pixel')  || url.includes('beacon'))) ||
-          (resourceType === 'script' && (url.includes('cookie') || url.includes('consent')))) {
-        blockedCount++;
+
+      let shouldSkip = (skipVisualResources && visualResourceTypes.includes(resourceType));
+      shouldSkip = shouldSkip || skipCustomList.some(skipItem => url.includes(skipItem));
+
+      if (!shouldSkip && skipThirdParty) {
+        try {
+          const requestDomain = psl.parse(new URL(url).hostname).domain;
+          shouldSkip = pageDomain !== requestDomain;
+        } catch {
+          console.warn("Parsing of request URL failed:", url);
+          shouldSkip = false;
+        }
+      }
+
+      if (shouldSkip) {
+        if (shouldLogSkipped) {
+          console.log("Skip loading request:", url);
+        }
+        skippedCount++;
         request.abort();
       } else {
         const reqId = (request as RequestWithId).id;
@@ -340,7 +331,7 @@ export default async (req: Request, context: Context) => {
     }
 
     // Single success log line with all important details
-    console.log(`PRERENDER SUCCESS: ${targetUrl} | ${renderTime}ms total (${getBrowserTime}ms get browser, ${navigationTime}ms nav, ${totalWaitTime}ms wait) | ${statusCode} status | ${htmlSize}B HTML | ${blockedCount} requests blocked | IP=${clientIP}`);
+    console.log(`PRERENDER SUCCESS: ${targetUrl} | ${renderTime}ms total (${getBrowserTime}ms get browser, ${navigationTime}ms nav, ${totalWaitTime}ms wait) | ${statusCode} status | ${htmlSize}B HTML | ${skippedCount} requests skipped | IP=${clientIP}`);
     
     /* 
     In resource-constrained environments, creating new pages often hangs for a while

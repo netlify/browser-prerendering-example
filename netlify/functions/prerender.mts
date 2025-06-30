@@ -31,7 +31,7 @@ const skipCustomList = process.env.PRERENDER_SKIP_CUSTOM_LIST?.split(",").filter
 const shouldLogSkipped = process.env.PRERENDER_SKIP_LOGGING?.toLowerCase() === "true";
 
 const visualResourceTypes = ['image', 'media', 'font', 'stylesheet'];
-const waitAfterLastRequest = 300; // 300ms wait after last request completes
+const waitAfterLastRequest = 500; // 500ms wait after last request completes
 const pageDoneCheckInterval = 100; // Check every 100ms
 const maxWaitTime = 10000; // Maximum wait time (10 seconds)
 const inFlightReportAfterTime = 1000; // After how long of a wait to start logging remaining in-flight requests 

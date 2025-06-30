@@ -25,10 +25,11 @@ const localShowBrowser = !isProduction && process.env.PRERENDER_LOCAL_SHOW_BROWS
 const userAgent = process.env.PRERENDER_USER_AGENT || 'Mozilla/5.0 (compatible; Netlify Prerender Function)';
 const skipConnectionTest = process.env.PRERENDER_SKIP_CONNECTION_TEST?.toLowerCase() === "true";
 const disableCaching = process.env.PRERENDER_DISABLE_CACHING?.toLowerCase() === "true";
+const blockVisualResources = !(process.env.PRERENDER_BLOCK_VISUAL_RESOURCES?.toLowerCase() === "false");
 
-// Block common cookie consent and tracking domains
-const customBlockedDomains = process.env.PRERENDER_CUSTOM_BLOCKED_DOMAINS?.split(",") || [];
-const blockedDomains = [
+// Cut loading time by blocking common cookie consent and tracking domains
+const customBlockList = process.env.PRERENDER_CUSTOM_BLOCK_LIST?.split(",").filter(Boolean) || [];
+const blockList = [
   'cookiebot.com',
   'onetrust.com',
   'quantcast.com',
@@ -39,12 +40,22 @@ const blockedDomains = [
   'googletagmanager.com',
   'facebook.com/tr',
   'hotjar.com',
-].concat(customBlockedDomains)
+  'hubspot.com',
+  'youtube.com',
+  'splunkcloud.com',
+  'doubleclick.net',
+  'sentry.io',
+  'gstatic.com',
+  'facebook.net',
+  'intercom.io',
+].concat(customBlockList)
+
+const visualResourceTypes = ['image', 'media', 'font', 'stylesheet'];
 
 const waitAfterLastRequest = 500; // 500ms wait after last request completes
 const pageDoneCheckInterval = 100; // Check every 100ms
 const maxWaitTime = 10000; // Maximum wait time (10 seconds)
-const inFlightReportAfterTime = 2000; // After how long of a wait to start logging remaining in-flight requests 
+const inFlightReportAfterTime = 1000; // After how long of a wait to start logging remaining in-flight requests 
 const inFlightReportInterval = 1000; // Report in-flight requests every second
 
 let browser: Browser|null = null;
@@ -87,7 +98,7 @@ async function getBrowser() {
       const executablePath = await chromium.executablePath();
       
       browser = await puppeteer.launch({
-        args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
+        args: [...chromium.args, '--disable-web-security'],
         defaultViewport: chromium.defaultViewport,
         executablePath: executablePath,
         headless: chromium.headless,
@@ -186,7 +197,8 @@ export default async (req: Request, context: Context) => {
       const resourceType = request.resourceType();
          
       // Block tracking pixels and cookie consent scripts
-      if (blockedDomains.some(domain => url.includes(domain)) ||
+      if (blockList.some(domain => url.includes(domain)) ||
+          (blockVisualResources && visualResourceTypes.includes(resourceType)) ||
           (resourceType === 'image' && (url.includes('track') || url.includes('pixel')  || url.includes('beacon'))) ||
           (resourceType === 'script' && (url.includes('cookie') || url.includes('consent')))) {
         blockedCount++;
